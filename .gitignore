@@ -1,0 +1,94 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.plan
+tfplan
+plan.out
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.tfvars
+*.tfvars.json
+.terraformrc
+terraform.rc
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+secrets/
+secrets.*
+*.pem
+*.key
+credentials
+credentials.*
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Operating system files
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Local plan reports, credentials, and operational logs
+*-plan-output.txt
+*-plan-review.txt
+*.log
+logs/
+.aws/
+.ssh/
+.docker/
+*.p12
+*.pfx
+*.jks
+id_rsa*
+id_ed25519*
+
+# Preserve sanitized examples
+!*.example.tfvars
+!*.example.tfvars.json
+!*.tfvars.example
+!*.tfvars.json.example
+!.env.*.example
+
+# Generated artifacts and additional local secret stores
+node_modules/
+dist/
+build/
+coverage/
+.coverage.*
+*.sqlite
+*.sqlite3
+*.db
+*.kdbx
+*.p8
+*.p7b
+*.der
+.netrc
+.npmrc
+*.tfplan.json
+*.plan.json
+terraform.tfstate.d/
