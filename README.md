@@ -150,7 +150,7 @@ These controls reduce risk but cannot guarantee that a language model will resis
 ### Security evaluation results
 
 - **Live prompt-injection evaluations:** The project owner reports five live scenarios. The reported coverage included direct instruction overrides, authority spoofing, and XML/JSON boundary manipulation. Per-scenario prompts, transcripts, and results were not present in the repository, so this README records the reported test coverage but does not claim independently reproducible pass results.
-- **Automated tests:** The full backend suite passed with **14 tests** in this documentation review: 10 operations-assistant tests, three security tests, and one health test. The operations tests exercise authentication, input checks, Bedrock error handling with a mocked call, and output-validation behavior. They do not make a live Bedrock request. Pytest also emitted three dependency/test-key warnings; the test key is not a production credential.
+- **Automated tests:** The full backend suite passed with **16 tests** in this review: 10 operations-assistant tests, three security tests, two transaction tests, and one health test. The operations tests exercise authentication, input checks, Bedrock error handling with a mocked call, and output-validation behavior. They do not make a live Bedrock request. The test run emitted one Starlette/httpx deprecation warning.
 - **Known validator behavior:** A test documents a false positive for harmless text quoting a prohibited claim; another verifies that the added patterns catch a previously missed unsafe paraphrase.
 
 No AI security screenshot images were found in the repository, so no image links are included. The [AI security screenshot folder](docs/screenshots/ai-security/README.md) contains publication guidance for future sanitized evidence.
@@ -180,7 +180,7 @@ For just the operations-assistant tests:
 python -m pytest -q tests/test_ops.py
 ```
 
-The full test command above was run successfully in the project's configured local Python environment. Note that `backend/requirements.txt` currently does not declare all packages imported by the AI/authentication code, including Boto3, PyJWT, and `pwdlib`; a fresh environment may need those dependencies installed before the application can start. No dependency or environment files were changed as part of this documentation update.
+The test command above was run successfully in the project's configured local Python environment. The backend requirements include the application dependencies for the Bedrock, JWT, password-hashing, and email-validation imports; install them into a local environment before running the API. No real credentials or JWTs belong in the repository.
 
 Provisioning and image publishing require separately reviewed operator permissions. Application execution/task roles do not grant the workstation image-push permission. Local policy artifacts alone do not prove effective AWS authorization. Ignore rules do not remove secrets already tracked in Git/history; check the actual publishing repository before committing.
 
