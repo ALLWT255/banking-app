@@ -1,8 +1,19 @@
-# AWS Banking API — Terraform and ECS Fargate
+# Cloud-Native Banking Application | Terraform, FastAPI & Amazon Bedrock
 
-A containerized FastAPI service deployed to AWS with modular Terraform. This portfolio project demonstrates private container networking, load balancing, IAM role separation, image publishing, and deployment verification.
+A cloud-engineering portfolio project combining modular Terraform infrastructure, a containerized FastAPI backend, and a source-level AI operations troubleshooting assistant. It demonstrates infrastructure design, AWS service integration, DevOps workflows, and layered AI security controls.
 
 **Status: Stage 1 was deployed and verified on October 30, 2026, then torn down; ECR was preserved.** The owner confirmed empty Terraform state after cleanup and the ECR repository with its `dev` image as ACTIVE. This is historical HTTP development evidence, not a currently running API or a production-ready service. RDS was disabled. The Stage 1 application exposed only the health API and Swagger UI, not a complete banking platform.
+
+The current backend source also contains a JWT-protected Amazon Bedrock operations endpoint and automated security tests. This later source and test evidence does not establish that the assistant or the current backend has been deployed to AWS. This documentation review did not query AWS.
+
+## Project overview
+
+- **Cloud-native application:** FastAPI backend packaged as a container and designed to run on ECS Fargate.
+- **Infrastructure as Code:** Terraform modules define the VPC, networking, security groups, IAM roles, compute, logging, image repository, and optional database.
+- **AI platform integration:** The backend source calls Amazon Bedrock using Boto3 and Claude Haiku 4.5 to provide read-only operational troubleshooting suggestions.
+- **DevOps and security:** The repository includes Terraform deployment guidance, backend tests, JWT-protected API access, input/output checks, and prompt-injection evaluations.
+
+The project is a portfolio implementation, not a complete or production-ready banking platform. The deployed Stage 1 and current source-code capabilities are described separately below.
 
 ## Verified deployment
 
@@ -19,7 +30,7 @@ These results were verified by the project owner for the **October 30, 2026** de
 | `GET /api/health` | `{"status":"healthy","service":"banking-api"}` |
 | `/docs` | Swagger UI accessible; documents the health route |
 
-[Application startup](backend/app/main.py) registers only the health router. Account and transaction route files exist but are empty and are not registered. No deployed account, transaction, authentication, database integration, or AI agent functionality is claimed. Those files are empty scaffolds for planned features; a populated health test exists, but test scaffolds do not prove deployed features.
+The historical Stage 1 application exposed only the health API and Swagger UI. Its deployment did not include account or transaction operations, authentication, database integration, or an AI assistant. The current source tree has since added the JWT-protected operations endpoint and related tests; those changes do not alter the historical deployment evidence or prove current AWS deployment.
 
 ## Stage 1 infrastructure (deployed, then torn down)
 
@@ -37,12 +48,42 @@ See the [architecture and module reference](docs/architecture.md), [troubleshoot
 
 | Path | Purpose |
 | --- | --- |
-| [backend](backend) | FastAPI source, Dockerfile, test scaffolding |
+| [backend](backend) | FastAPI source, Dockerfile, and automated tests |
 | [Terraform root](terraform) | Provider, variables, module wiring, outputs |
 | [modules](terraform/modules) | `vpc`, `security`, `iam`, `compute`, optional `database` |
 | [docs](docs) | Architecture, troubleshooting, evidence guidance |
 
 All application documentation and screenshot guidance live inside this project. Paths and commands below are relative to `terraform/banking-app/`, the Banking App project root.
+
+## AWS infrastructure
+
+### Terraform implementation
+
+The Terraform source defines:
+
+- **Amazon ECS Fargate** for the containerized backend, with private task networking.
+- **Application Load Balancer** across public subnets, forwarding to backend tasks in private subnets.
+- **Amazon VPC** with public and private subnets across two Availability Zones, an Internet Gateway, and a shared NAT Gateway.
+- **Amazon ECR** for the backend image, configured for image scanning on push.
+- **Amazon CloudWatch Logs** for container logs with seven-day retention.
+- **IAM roles and security groups** separating ECS task execution from application role identity and restricting backend/database traffic.
+- **Amazon RDS for PostgreSQL** as an optional Terraform module; the project default disables database creation.
+
+These are resources defined in Terraform, not a statement that they currently exist in AWS. The documented Stage 1 deployment was historically applied and verified, then torn down. ECR was preserved; no current ECS service, load balancer, VPC, or RDS deployment is claimed. See the [architecture and Terraform reference](docs/architecture.md) for the module inventory and historical deployment details.
+
+The Bedrock operations integration is not wired into the current Terraform task definition: the application task role has no Bedrock permissions attached by the IAM module, and the task definition does not configure the AI runtime. Treat the assistant as implemented and locally tested source code, not as an AWS-hosted feature.
+
+## AI operations assistant
+
+The FastAPI backend implements `POST /api/ops/analyze`, an authenticated endpoint intended to provide read-only operational troubleshooting:
+
+- **Model and SDK:** Amazon Bedrock Runtime Converse API through Boto3, using the Claude Haiku 4.5 model identifier configured in the service.
+- **Authentication:** JWT-authenticated HTTP access. The route rejects unauthenticated or invalid-token requests.
+- **Input and output:** The request accepts an operational description; the response contains an `analysis` string. The service has no infrastructure execution tools and is designed to return explanations and safe troubleshooting suggestions, not to change AWS resources.
+- **Untrusted input handling:** The backend checks selected sensitive-data patterns before calling Bedrock and JSON-serializes the operational description before placing it in the user message.
+- **Failure handling:** Sensitive input is rejected with a client error; Bedrock invocation failures and rejected model output return controlled gateway errors rather than the raw exception or unsafe response.
+
+The configured AWS region is `us-east-1`. Live Bedrock invocation also depends on a locally configured AWS identity with appropriate model access; passing the automated tests does not establish live AWS access.
 
 ## Deployment workflow
 
@@ -91,13 +132,61 @@ The digest above records the verified ECR image, while Terraform still reference
 
 Tasks have no public IPs. Their port 8000 accepts inbound traffic only from the ALB security group; ALB egress is limited to that backend port. Backend egress permits HTTPS to the internet and PostgreSQL to the database security group. The final Docker build stage runs as a non-root user. The application task role has no permissions attached by these modules.
 
-This is an HTTP demo. The ALB security group allows port 443, but no HTTPS listener is active because the root passes no ACM certificate. Health checks return static JSON and do not verify database readiness. The database security group remains even with RDS disabled. Authentication, WAF, autoscaling, alarms, a deployment CI/CD workflow, and durable banking data are not configured. Two-AZ targets do not remove the shared single-NAT egress dependency.
+The historical Stage 1 deployment was an HTTP demo. Its ALB security group allowed port 443, but no HTTPS listener was active because the root passed no ACM certificate. Health checks return static JSON and do not verify database readiness. The database security group remains even with RDS disabled. The current backend source includes JWT authentication for the AI operations endpoint, but this was not part of the deployed Stage 1 service. WAF, autoscaling, alarms, a deployment CI/CD workflow, and durable banking data remain unconfigured. Two-AZ targets do not remove the shared single-NAT egress dependency.
+
+## AI security controls and testing
+
+The implementation uses multiple defense-in-depth measures:
+
+1. **JWT authentication** protects the operations route.
+2. **Sensitive-data validation** checks selected patterns such as AWS access keys, bearer tokens, and password assignments before sending input to Bedrock. This regex-based check is not comprehensive sensitive-data detection.
+3. **System-level security instructions** define the assistant as read-only, direct it to treat user descriptions as untrusted data, and tell it to ignore embedded instructions and authority claims.
+4. **JSON serialization** separates user-provided operational text into a JSON value, with instructions that the value is untrusted. JSON serialization is a data-formatting measure, not a security boundary or a prompt-injection prevention guarantee.
+5. **Output validation** checks for selected sensitive patterns and prohibited infrastructure-action claims before returning the response.
+6. **Controlled API errors** reject sensitive input with HTTP 400 and return HTTP 502 for Bedrock invocation failures or output rejected by validation, without returning raw provider details or the rejected output.
+
+These controls reduce risk but cannot guarantee that a language model will resist prompt injection. In particular, regex-based output validation can reject safe explanatory text that quotes a prohibited phrase. The original validator also missed some unsafe paraphrases; additional patterns were implemented, and a regression test now covers an unsafe paraphrase. These limitations are covered by [the operations tests](backend/tests/test_ops.py).
+
+### Security evaluation results
+
+- **Live prompt-injection evaluations:** The project owner reports five live scenarios. The reported coverage included direct instruction overrides, authority spoofing, and XML/JSON boundary manipulation. Per-scenario prompts, transcripts, and results were not present in the repository, so this README records the reported test coverage but does not claim independently reproducible pass results.
+- **Automated tests:** The full backend suite passed with **14 tests** in this documentation review: 10 operations-assistant tests, three security tests, and one health test. The operations tests exercise authentication, input checks, Bedrock error handling with a mocked call, and output-validation behavior. They do not make a live Bedrock request. Pytest also emitted three dependency/test-key warnings; the test key is not a production credential.
+- **Known validator behavior:** A test documents a false positive for harmless text quoting a prohibited claim; another verifies that the added patterns catch a previously missed unsafe paraphrase.
+
+No AI security screenshot images were found in the repository, so no image links are included. The [AI security screenshot folder](docs/screenshots/ai-security/README.md) contains publication guidance for future sanitized evidence.
+
+## Local development and testing
+
+The following PowerShell commands are for local development from the Banking App project root. Use your own local-only values; do not commit secrets, credentials, JWTs, or populated environment files. Activate a Python environment containing the backend dependencies first.
+
+```powershell
+Set-Location backend
+$env:DATABASE_URL = "sqlite:///./local-dev.db"
+$env:JWT_SECRET_KEY = "<local-only-random-secret>"
+# Set this only when making a live Bedrock request with an authorized local AWS profile.
+$env:AWS_PROFILE = "<authorized-local-aws-profile>"
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+In another terminal, run the automated tests from `backend/`:
+
+```powershell
+python -m pytest -q
+```
+
+For just the operations-assistant tests:
+
+```powershell
+python -m pytest -q tests/test_ops.py
+```
+
+The full test command above was run successfully in the project's configured local Python environment. Note that `backend/requirements.txt` currently does not declare all packages imported by the AI/authentication code, including Boto3, PyJWT, and `pwdlib`; a fresh environment may need those dependencies installed before the application can start. No dependency or environment files were changed as part of this documentation update.
 
 Provisioning and image publishing require separately reviewed operator permissions. Application execution/task roles do not grant the workstation image-push permission. Local policy artifacts alone do not prove effective AWS authorization. Ignore rules do not remove secrets already tracked in Git/history; check the actual publishing repository before committing.
 
 ## Future improvements and AWS cost awareness
 
-Next steps include HTTPS/certificate wiring, immutable image digests, short-lived CI/CD role credentials, encrypted remote state with locking, application tests/authentication, and monitoring. Database integration requires application work: enabling the existing RDS module alone does not connect the container to it. Review its single-AZ setting and skipped final snapshot before storing valuable data.
+Next steps include structured AI responses, additional prompt-injection evaluations, AI request monitoring, rate limiting, and expanded security regression coverage. Cloud platform improvements include HTTPS/certificate wiring, immutable image digests, short-lived CI/CD role credentials, encrypted remote state with locking, and operational monitoring. Database integration requires application work: enabling the existing RDS module alone does not connect the container to it. Review its single-AZ setting and skipped final snapshot before storing valuable data.
 
 Costs include Fargate compute, ALB hours/capacity, NAT hours/data processing, public IPv4 addresses, ECR storage, CloudWatch ingestion/storage, and data transfer. Shared NAT egress can also incur cross-AZ transfer costs. Enabling RDS adds database costs. Use budgets, cost tags, and current regional pricing; no free-tier or fixed-price claim is made. Plan authorized cleanup of unused resources and review data retention before destruction.
 
