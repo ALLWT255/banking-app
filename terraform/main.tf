@@ -7,15 +7,16 @@ module "vpc" {
   public_subnets  = var.public_subnets
   private_subnets = var.private_subnets
 }
+
 module "security" {
   source = "./modules/security"
 
   enable_dev_http_listener = var.enable_dev_http_listener
 
   project_name = var.project_name
-
-  vpc_id = module.vpc.vpc_id
+  vpc_id       = module.vpc.vpc_id
 }
+
 module "database" {
   count  = var.enable_database ? 1 : 0
   source = "./modules/database"
@@ -26,13 +27,26 @@ module "database" {
 
   db_name = var.db_name
 }
-module "iam" {
-  source = "./modules/iam"
 
+module "iam" {
+  source       = "./modules/iam"
   project_name = var.project_name
+
+  enable_database = var.enable_database
+
+  database_secret_arn = var.enable_database ? module.database[0].database_master_secret_arn : null
+
+  jwt_secret_arn = var.jwt_secret_arn
 }
+
 module "compute" {
   source = "./modules/compute"
+
+  depends_on = [
+    module.iam,
+    module.vpc,
+    module.security
+  ]
 
   enable_dev_http_listener = var.enable_dev_http_listener
 
@@ -47,4 +61,11 @@ module "compute" {
 
   ecs_execution_role_arn = module.iam.ecs_execution_role_arn
   ecs_task_role_arn      = module.iam.ecs_task_role_arn
+
+  db_host             = var.enable_database ? module.database[0].database_endpoint : null
+  db_port             = var.enable_database ? module.database[0].database_port : 5432
+  db_name             = var.enable_database ? var.db_name : null
+  database_secret_arn = var.enable_database ? module.database[0].database_master_secret_arn : null
+
+  jwt_secret_arn = var.jwt_secret_arn
 }

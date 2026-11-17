@@ -63,9 +63,9 @@ Expected JSON: `{"status":"healthy","service":"banking-api"}`. Swagger should sh
 
 ## State and remaining evidence
 
-Saved plan artifacts may reflect older database-enabled configuration. Do not treat them as current deployment evidence or reapply them without review. RDS is disabled in the inspected dev file and owner's report; this review did not inventory AWS. Preserve state privately and create fresh reviewed plans for future changes.
+Saved plan artifacts may reflect older database-enabled configuration. Do not treat them as current deployment evidence or reapply them without review. Stage 2 RDS and Bedrock integration are verified as November 17, 2026 deployment results. Preserve state privately and create fresh reviewed plans for future changes.
 
-Still to record: sanitized original errors, the approved publisher identity, exact IAM/policy changes, and real screenshots. The date, ECR digest, temporary MFA credential use, and `cmd /c` workaround are confirmed. HTTPS, RDS, and banking operations remain outside the verified development functionality. No screenshot or claim of a running task digest was inferred from the ECR digest alone.
+Still to record: detailed incident reports and break/fix documentation for separate future work. The date, ECR digest, temporary MFA credential use, and `cmd /c` workaround are confirmed. Stage 2 RDS and Bedrock functionality are verified, while public HTTPS and production banking operations remain outside the implemented scope. No screenshot or claim of a running task digest is inferred from the ECR digest alone.
 
 ## Teardown and preserved ECR
 

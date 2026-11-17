@@ -52,3 +52,31 @@ variable "enable_dev_http_listener" {
   type        = bool
   default     = false
 }
+variable "db_host" {
+  description = "RDS PostgreSQL hostname"
+  type        = string
+  default     = null
+}
+
+variable "db_port" {
+  description = "RDS PostgreSQL port"
+  type        = number
+  default     = 5432
+}
+
+variable "db_name" {
+  description = "PostgreSQL database name"
+  type        = string
+  default     = null
+}
+
+variable "database_secret_arn" {
+  description = "ARN of the RDS-managed database secret"
+  type        = string
+  default     = null
+}
+variable "jwt_secret_arn" {
+  description = "ARN of the JWT signing secret for the ECS backend"
+  type        = string
+  default     = null
+}

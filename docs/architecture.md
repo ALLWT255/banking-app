@@ -1,91 +1,169 @@
-# Architecture and Terraform reference
+# Architecture and Terraform Reference
 
-This reference describes inspected source and owner-verified October 30, 2026 deployment results. AWS was not queried. The diagram shows the Stage 1 configuration deployed before teardown, not a current resource inventory. The owner confirmed teardown completed with empty Terraform state; only the preserved ECR repository/image was verified ACTIVE afterward. The observed targets span two AZs; Terraform configures two desired tasks and two private subnets, not a fixed task per subnet.
+## Overview
+
+This document describes the cloud architecture successfully deployed and validated on November 17, 2026, during Stage 2 of the Cloud-Native Banking Application project.
+
+The architecture combines modular Terraform infrastructure, private containerized services, encrypted relational storage, centralized secrets management, and generative AI through Amazon Bedrock.
+
+The environment is designed for development and portfolio demonstration rather than production financial workloads.
+
+## AWS Architecture
 
 ```mermaid
 flowchart TB
-    Internet["Internet clients"]
-    ECR["Amazon ECR: backend image dev"]
-    IAM["IAM execution role and application task role"]
-    Logs["CloudWatch Logs: seven-day retention"]
-    subgraph VPC["VPC 10.0.0.0/16 - us-east-1"]
+    Client["Internet Clients"]
+    ECR["Amazon ECR"]
+    Secrets["AWS Secrets Manager"]
+    Logs["Amazon CloudWatch Logs"]
+    Bedrock["Amazon Bedrock - Claude Haiku 4.5"]
+
+    subgraph VPC["VPC - 10.0.0.0/16 - us-east-1"]
         IGW["Internet Gateway"]
-        ALB["Public ALB across both public subnets - HTTP 80"]
-        PublicRT["Public route table: default to IGW"]
-        PrivateRT["Private route table: default to NAT"]
-        subgraph AZA["us-east-1a"]
-            PublicA["Public subnet 10.0.1.0/24"]
-            NAT["NAT Gateway with Elastic IP in public subnet A"]
-            TaskA["Private subnet 10.0.11.0/24: Fargate target on 8000"]
+        ALB["Public Application Load Balancer"]
+
+        subgraph AZA["Availability Zone us-east-1a"]
+            PublicA["Public Subnet - 10.0.1.0/24"]
+            NATA["NAT Gateway + Elastic IP"]
+            PrivateA["Private Subnet - 10.0.11.0/24"]
+            TaskA["Fargate Backend Target"]
         end
-        subgraph AZB["us-east-1b"]
-            PublicB["Public subnet 10.0.2.0/24"]
-            TaskB["Private subnet 10.0.12.0/24: Fargate target on 8000"]
+
+        subgraph AZB["Availability Zone us-east-1b"]
+            PublicB["Public Subnet - 10.0.2.0/24"]
+            PrivateB["Private Subnet - 10.0.12.0/24"]
+            TaskB["Fargate Backend Target"]
         end
+
+        RDS[("Private RDS PostgreSQL - Single AZ")]
+        PrivateRT["Private Route Table"]
+        PublicRT["Public Route Table"]
+
         ALB --- PublicA
         ALB --- PublicB
+
         PublicA --- PublicRT
         PublicB --- PublicRT
         PublicRT --> IGW
-        PublicA --- NAT
-        ALB -->|"HTTP 8000 and health checks"| TaskA
-        ALB -->|"HTTP 8000 and health checks"| TaskB
-        TaskA -->|"Outbound HTTPS"| PrivateRT
-        TaskB -->|"Outbound HTTPS"| PrivateRT
-        PrivateRT --> NAT
-        NAT --> IGW
+
+        PublicA --- NATA
+        PrivateA --- TaskA
+        PrivateB --- TaskB
+
+        ALB -->|HTTP 8000| TaskA
+        ALB -->|HTTP 8000| TaskB
+
+        TaskA -->|PostgreSQL TLS 5432| RDS
+        TaskB -->|PostgreSQL TLS 5432| RDS
+
+        TaskA --> PrivateRT
+        TaskB --> PrivateRT
+        PrivateRT --> NATA
+        NATA --> IGW
     end
-    Internet -->|"HTTP 80 via IGW"| ALB
-    IGW -->|"Outbound service access"| ECR
-    IGW -->|"Outbound log delivery"| Logs
-    IAM -.->|"Identity and permissions"| TaskA
-    IAM -.->|"Identity and permissions"| TaskB
+
+    Client -->|Development HTTP 80| ALB
+
+    IGW <-->|HTTPS| Bedrock
+    IGW <-->|HTTPS| ECR
+    IGW <-->|HTTPS| Secrets
+    IGW -->|HTTPS| Logs
 ```
 
-Subnet links indicate placement/association; arrows show logical traffic. IAM dotted links represent permissions, not routing. ECR pulls and log delivery use public endpoints via NAT; no VPC endpoints are configured. ALB ingress does not traverse NAT. RDS is absent because it was disabled in Stage 1. ECR remains declared as a Terraform resource even though it was removed from state for preservation; it must be imported before a future normal apply.
+The diagram represents logical connectivity and intended workload distribution. ECS manages task placement across the available private subnets; Terraform does not assign a fixed task to each Availability Zone.
 
-## Module inventory
+The RDS subnet group spans both private subnets, but the database instance itself is Single-AZ.
 
-| Module | Resources and behavior |
+## 1. Networking Architecture
+
+### Virtual Private Cloud
+
+| Configuration | Value |
 | --- | --- |
-| [vpc](../terraform/modules/vpc/main.tf) | DNS-enabled VPC; two public/two private subnets; IGW; one EIP/NAT in `us-east-1a`; two route tables with default routes; four associations |
-| [security](../terraform/modules/security/main.tf) | ALB/backend/database security groups; four active ingress rules including development HTTP; three egress rules |
-| [iam](../terraform/modules/iam/main.tf) | Two roles trusting `ecs-tasks.amazonaws.com`; execution role attached to `AmazonECSTaskExecutionRolePolicy`; no application-task policy attachment |
-| [compute](../terraform/modules/compute/main.tf) | ECR, ECS cluster/task definition/service, log group, ALB, IP target group, HTTP listener; optional HTTPS inactive |
-| [database](../terraform/modules/database/main.tf) | Root count disables it; when enabled, creates DB subnet group and private encrypted PostgreSQL RDS with AWS-managed master password |
+| Region | us-east-1 |
+| VPC CIDR | 10.0.0.0/16 |
+| Availability Zones | us-east-1a, us-east-1b |
+| DNS resolution | Enabled |
+| Public subnets | 2 |
+| Private subnets | 2 |
+| NAT Gateways | 1 |
+| Internet Gateways | 1 |
 
-The reported **34 additions** are a historical apply result, not a state inventory or computed total from current source. Existing resources and conditional resources can affect an apply count. No fresh plan or state audit was performed to reconcile that number.
+### Subnet Allocation
 
-## Root variables
+| Subnet | CIDR | Availability Zone |
+| --- | --- | --- |
+| Public A | 10.0.1.0/24 | us-east-1a |
+| Public B | 10.0.2.0/24 | us-east-1b |
+| Private A | 10.0.11.0/24 | us-east-1a |
+| Private B | 10.0.12.0/24 | us-east-1b |
 
-[Variables](../terraform/variables.tf) require project name, VPC CIDR, both subnet maps, and database name. Both enable flags default to false. The inspected local dev tfvars file contains the following non-secret settings. A fresh checkout can use these to recreate `terraform/environments/dev/terraform.tfvars` relative to the Banking App project root:
+Public subnets support internet-facing infrastructure, while private subnets host backend services and database resources.
 
-```hcl
-project_name = "banking-app-dev"
-vpc_cidr = "10.0.0.0/16"
-public_subnets = {
-  "us-east-1a" = "10.0.1.0/24"
-  "us-east-1b" = "10.0.2.0/24"
-}
-private_subnets = {
-  "us-east-1a" = "10.0.11.0/24"
-  "us-east-1b" = "10.0.12.0/24"
-}
-db_name = "bankingdb"
-enable_dev_http_listener = true
-enable_database = false
+### Routing
+
+Public subnet routing:
+
+```text
+0.0.0.0/0 → Internet Gateway
 ```
 
-`db_name` is still required when RDS is disabled. NAT placement explicitly indexes `us-east-1a`; changing AZs requires code review. Region and profile are fixed in [providers.tf](../terraform/providers.tf), not root variables.
+Private subnet routing:
 
-Compute/security default `backend_port` to 8000. Compute defaults `acm_certificate_arn` to null; the root exposes no certificate variable or forwarding argument. Database defaults are `db.t3.micro`, 20 GiB gp3, username `bankadmin`; root passes only database name and networking. The optional instance has seven-day backups, encryption, `multi_az = false`, and `skip_final_snapshot = true`.
+```text
+0.0.0.0/0 → NAT Gateway
+```
 
-## Health, runtime, and outputs
+The NAT Gateway resides in the first public subnet and provides outbound connectivity for both private subnets.
 
-The ALB checks HTTP `/api/health` for 200 every 30 seconds, with five-second timeout, healthy threshold two and unhealthy threshold three. ECS grace period is 60 seconds. There is no task-definition container health check. Static health JSON does not establish database readiness.
+Private ECS tasks use outbound HTTPS to access services including:
 
-The Dockerfile contains two base-image stages; the final stage runs Uvicorn on `0.0.0.0:8000` as UID 10001. Dependencies list FastAPI and Uvicorn without version pins. Image tag `dev` is mutable. These are review items, not code changes made by this documentation work.
+- Amazon ECR.
+- Amazon CloudWatch.
+- AWS Secrets Manager.
+- Amazon Bedrock.
 
-[Root outputs](../terraform/outputs.tf) expose VPC/subnet IDs and nullable database values. Compute outputs are not implemented, so ALB DNS, ECS details, and ECR URI require an authorized Console lookup. No S3 backend is declared; local state is used by default. State, backups, saved plans, and plan text should remain private.
+Inbound application traffic reaches ECS through the Application Load Balancer, not through the NAT Gateway.
 
-HTTPS, authentication, database integration, CI/CD, remote state, autoscaling, and alerting remain future work. The single NAT is an egress availability/cost tradeoff. Execution and application roles are separate from the operator's deployment role and do not grant a workstation permission to publish images.
+### Networking Trade-Off
+
+A single NAT Gateway reduces development infrastructure costs but introduces a shared egress dependency and potential cross-AZ data transfer charges.
+
+A production architecture should evaluate redundant NAT Gateways and applicable AWS VPC endpoints.
+
+## 2. Application Load Balancer
+
+The internet-facing Application Load Balancer distributes incoming application traffic across registered ECS task IP addresses.
+
+| Configuration | Value |
+| --- | --- |
+| Listener | HTTP 80 |
+| Target type | IP |
+| Backend port | 8000 |
+| Health check | /api/health |
+| Health matcher | HTTP 200 |
+| Health check interval | 30 seconds |
+| Health check timeout | 5 seconds |
+| Healthy threshold | 2 |
+| Unhealthy threshold | 3 |
+
+The ALB spans both public subnets.
+
+An optional HTTPS listener exists in the compute module, but the development deployment does not provide an ACM certificate.
+
+Public HTTP is intended only for development connectivity and non-sensitive health validation.
+
+Authentication credentials and financial information must not be transmitted over this development HTTP listener.
+
+## 3. ECS Fargate Compute
+
+The backend runs as an ECS Fargate service.
+
+| Configuration | Value |
+| --- | --- |
+| Launch type | Fargate |
+| Network mode | awsvpc |
+| Desired task count | 2 |
+| CPU per task | 256 CPU units |
+| Memory per task | 512 MiB |
+| Container port | 8000 |

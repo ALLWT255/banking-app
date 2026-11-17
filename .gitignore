@@ -92,3 +92,9 @@ coverage/
 *.tfplan.json
 *.plan.json
 terraform.tfstate.d/
+
+# Local Bedrock testing payload
+backend/bedrock-test.json
+
+# Public AWS RDS certificate bundle
+!backend/certs/global-bundle.pem

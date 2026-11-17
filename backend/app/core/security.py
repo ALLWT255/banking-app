@@ -1,11 +1,23 @@
+
 import os
 from datetime import datetime, timedelta, timezone
+
 import jwt
 from pwdlib import PasswordHash
-from fastapi import Depends
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi import Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+
+# Validate the JWT signing key when this module loads.
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+
+if not JWT_SECRET_KEY:
+    raise RuntimeError(
+        "JWT_SECRET_KEY environment variable is not set"
+    )
+
+
+# Password hashing
 password_hash = PasswordHash.recommended()
 
 
@@ -22,12 +34,9 @@ def verify_password(
         hashed_password
     )
 
+
+# JWT creation
 def create_access_token(user_id: int) -> str:
-    secret_key = os.getenv("JWT_SECRET_KEY")
-
-    if not secret_key:
-        raise RuntimeError("JWT_SECRET_KEY environment variable is not set")
-
     expiration = datetime.now(timezone.utc) + timedelta(minutes=30)
 
     payload = {
@@ -35,18 +44,19 @@ def create_access_token(user_id: int) -> str:
         "exp": expiration
     }
 
-    return jwt.encode(payload, secret_key, algorithm="HS256")
+    return jwt.encode(
+        payload,
+        JWT_SECRET_KEY,
+        algorithm="HS256"
+    )
 
+
+# JWT verification
 def verify_access_token(token: str) -> int | None:
-    secret_key = os.getenv("JWT_SECRET_KEY")
-
-    if not secret_key:
-        raise RuntimeError("JWT_SECRET_KEY environment variable is not set")
-
     try:
         payload = jwt.decode(
             token,
-            secret_key,
+            JWT_SECRET_KEY,
             algorithms=["HS256"]
         )
 
@@ -57,10 +67,18 @@ def verify_access_token(token: str) -> int | None:
 
         return user_id
 
-    except (jwt.InvalidTokenError, KeyError, ValueError, TypeError):
+    except (
+        jwt.InvalidTokenError,
+        KeyError,
+        ValueError,
+        TypeError
+    ):
         return None
 
+
+# Require a Bearer token for protected endpoints
 bearer_scheme = HTTPBearer()
+
 
 def get_current_user_id(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)

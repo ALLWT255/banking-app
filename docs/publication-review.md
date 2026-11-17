@@ -1,102 +1,109 @@
-# First-commit publication review
+# GitHub publication review
 
-Review date: October 30, 2026. Scope: this Banking App Git repository, including tracked/index paths and all untracked files admitted by Git ignore rules. The initial review found no commits or staged files. At the subsequent account-ID redaction review, all 64 manifest files were already staged. That existing staging was preserved; only README.md, docs/troubleshooting.md, and this report were updated in the index. No commit or push was performed.
+Review date: November 17, 2026. Scope: tracked files, staged changes, ignored sensitive candidates, source implementation, and accessible Git history.
 
-## PASS
+## Historical Stage 1 evidence
 
-- No confirmed embedded credentials, private keys, database passwords, or authentication tokens found in the publication candidates. All candidates are text files. Checks included credential signatures, literal assignments, URL credentials, high-entropy candidates, and review of source/example/documentation context. This is a point-in-time source audit, not a guarantee against every possible secret format.
-- `terraform/modules/database/main.tf:24`: password-related match [REDACTED]; reviewed as AWS-managed password configuration, not a credential literal.
-- Real local state/backups, saved plans and plan text, dev tfvars, provider cache, Python caches and virtual environment are ignored. Synthetic ignore tests also cover environment files, credentials, keys, generated artifacts, and safe example exceptions.
-- The dependency lock file is included and pins AWS provider 6.67.0; its hashes are provider checksums, not secrets. Safe examples remain eligible for Git; the existing `.env.example` is empty.
-- Stage 1 claims are limited to VPC, ECR, ECS Fargate, ALB, logs/IAM, health API and Swagger. The docs distinguish successful historical deployment from completed teardown and preserved ECR.
-- EIP teardown incident and mandatory preserved-ECR import before normal redeployment are documented. No Terraform commands or AWS account requests were made during this review.
+October 30, 2026 initial deployment evidence remains relevant:
 
-## WARN
+- 34 Terraform resources provisioned.
+- ECS Fargate backend and public ALB deployed.
+- Two healthy targets across both public-subnet availability zones.
+- `/api/health` and Swagger UI returned successful responses.
+- Infrastructure was torn down while the ECR repository and image were preserved.
 
-- Account-specific identifiers in the README and troubleshooting examples have been replaced with `<AWS_ACCOUNT_ID>`. Replace documentation placeholders locally before running example commands; no Terraform or AWS configuration was changed.
-- Real screenshots, original sanitized error transcripts, exact IAM policy change scope, and publisher identity remain outstanding. No evidence images were fabricated.
-- Many application packages, account/transaction routes, database/authentication/agent files, and tests are empty scaffolds. The backend README and environment example are also empty. They are safe to include as scaffolding, not completed features. Empty frontend and workflow directories will not appear in Git.
-- A populated health test exists; application tests were not executed for this documentation-only audit. The runtime dependency list does not declare the test runner/client dependencies. The Dockerfile has a redundant earlier stage, and runtime dependencies are unpinned; these were left unchanged.
-- The provider contains a local profile name and fixed region. Other users must configure an authorized local profile. The ECR `dev` tag is mutable and the preserved repository still incurs storage costs.
-- Git ignore rules do not protect files deliberately force-added later. Recheck the staged diff and repeat secret scanning after adding any real screenshots or changing files.
+Stage 1 did not include RDS or live Bedrock integration. Historical results must not be presented as current availability.
 
-## FAIL
+## Stage 2 deployment status
 
-No blocking publication failures were found in the reviewed candidate files. This is readiness for a source-code first commit, not a production-readiness or AWS authorization assessment.
+November 17, 2026 Stage 2 verification succeeded:
 
-## Resolved public-identifier findings
+- Modular Terraform infrastructure deployed.
+- ECS Fargate backend ran in private subnets behind the ALB.
+- RDS PostgreSQL was private and storage-encrypted.
+- RDS used one-day backup retention and Single-AZ deployment.
+- Database credentials and the JWT signing secret were managed through Secrets Manager.
+- Alembic migrated to `d368608d12af`.
+- Verified tables: `users`, `accounts`, `transactions`, and `alembic_version`.
+- Health and readiness endpoints returned HTTP 200.
+- 19 local Pytest tests passed.
+- Scoped Bedrock permissions were added to the ECS application task role by Terraform.
+- Live Claude Haiku 4.5 inference completed from private Fargate with exit code 0.
+- Full Terraform plan returned no changes after the Bedrock IAM deployment.
 
-- `README.md:73`: ECR registry account identifier replaced with `<AWS_ACCOUNT_ID>`.
-- `docs/troubleshooting.md:21`: repository ARN account identifier replaced with `<AWS_ACCOUNT_ID>`.
-- `docs/troubleshooting.md:30`: Docker login registry account identifier replaced with `<AWS_ACCOUNT_ID>`.
+## Verified AI API security tests
 
-## Complete intended first-commit manifest
+The endpoint was tested in a standalone ECS Fargate task with FastAPI `TestClient` and live Bedrock inference:
 
-All paths are relative to the Banking App Git root. The list includes this report. Ignored local state, plans, tfvars, credentials/caches and empty directories are excluded.
+| Check | Result |
+| --- | --- |
+| Missing authentication | 401 |
+| Invalid JWT | 401 |
+| Prohibited sensitive input | 400 |
+| Valid authenticated AI request | 200 |
+
+All four checks passed. A synthetic JWT was generated inside the container. Public login and authenticated public-ALB traffic were not tested because HTTPS is not configured.
+
+## Security review findings
+
+PASS:
+
+- No confirmed AWS access-key literals or private-key payloads were found in tracked publication candidates.
+- RDS master passwords are AWS-managed rather than literals in Terraform.
+- The JWT signing secret is not committed as a source value.
+- Local state, saved plans, tfvars, environment files, virtual environments, provider caches, credentials, and databases are ignored.
+- The public RDS CA certificate remains available at `backend/certs/global-bundle.pem`.
+
+WARN:
+
+- `terraform/environments/dev/terraform.tfvars` exists locally and must remain ignored.
+- Terraform state and plan artifacts exist locally and must remain ignored.
+- Screenshots are outstanding and could expose AWS identifiers or credentials if not sanitized.
+- The ignore rules protect normal additions but not deliberately force-added files.
+- Secret review cannot guarantee detection of every possible credential format.
+
+## Remaining risks and architecture limitations
+
+- Public development HTTP; HTTPS is not configured.
+- RDS is Single-AZ with one-day backup retention.
+- One shared NAT Gateway is an availability and egress-cost dependency.
+- Terraform state is local and no remote locking backend is configured.
+- Container tags are mutable.
+- RDS master-user credentials are in use.
+- Production monitoring, alerting, WAF, autoscaling, and automated CI/CD are absent.
+- Prompt-injection controls are defense-in-depth, not complete prevention.
+- No claim of production readiness or banking regulatory compliance is made.
+
+## Publication readiness
+
+Documentation can be published in source form after screenshots are copied and reviewed or explicitly recorded as missing. Before commit:
+
+- Do not add `.tfstate`, `.tfplan`, `.tfvars`, `.env`, private keys, credentials, databases, virtual environments, or provider caches.
+- Preserve and allow `backend/certs/global-bundle.pem`.
+- Recheck the staged diff and repeat secret scanning after screenshots are added.
+- Keep screenshots out of Git until AWS identifiers, JWTs, session tokens, passwords, MFA values, and unrelated account details are redacted.
+
+## Current repository structure
 
 ```text
-.gitignore
-README.md
-backend/.dockerignore
-backend/.env.example
-backend/Dockerfile
-backend/README.md
-backend/app/__init__.py
-backend/app/agents/__init__.py
-backend/app/agents/banking_ops_agent.py
-backend/app/agents/tools/__init__.py
-backend/app/api/__init__.py
-backend/app/api/routes/__init__.py
-backend/app/api/routes/accounts.py
-backend/app/api/routes/health.py
-backend/app/api/routes/transactions.py
-backend/app/core/__init__.py
-backend/app/core/config.py
-backend/app/core/logging.py
-backend/app/core/security.py
-backend/app/db/__init__.py
-backend/app/db/database.py
-backend/app/db/session.py
-backend/app/main.py
-backend/app/models/__init__.py
-backend/app/models/account.py
-backend/app/models/transaction.py
-backend/app/models/user.py
-backend/app/schemas/__init__.py
-backend/app/schemas/account.py
-backend/app/schemas/transaction.py
-backend/app/services/__init__.py
-backend/app/services/account_service.py
-backend/app/services/transaction_service.py
-backend/migrations/.gitkeep
-backend/requirements.txt
-backend/tests/__init__.py
-backend/tests/test_accounts.py
-backend/tests/test_health.py
-backend/tests/test_transactions.py
-docs/architecture.md
-docs/publication-review.md
-docs/screenshots/README.md
-docs/troubleshooting.md
-terraform/.terraform.lock.hcl
-terraform/main.tf
-terraform/modules/compute/main.tf
-terraform/modules/compute/outputs.tf
-terraform/modules/compute/variables.tf
-terraform/modules/database/main.tf
-terraform/modules/database/outputs.tf
-terraform/modules/database/variables.tf
-terraform/modules/iam/main.tf
-terraform/modules/iam/outputs.tf
-terraform/modules/iam/variables.tf
-terraform/modules/security/main.tf
-terraform/modules/security/outputs.tf
-terraform/modules/security/variables.tf
-terraform/modules/vpc/main.tf
-terraform/modules/vpc/outputs.tf
-terraform/modules/vpc/variables.tf
-terraform/outputs.tf
-terraform/providers.tf
-terraform/variables.tf
-terraform/versions.tf
+banking-app/
+├── backend/
+│   ├── app/
+│   ├── certs/global-bundle.pem
+│   ├── migrations/
+│   ├── tests/
+│   ├── Dockerfile
+│   └── README.md
+├── terraform/
+│   ├── modules/{compute,database,iam,security,vpc}/
+│   └── main.tf
+└── docs/
+    ├── architecture.md
+    ├── security-design.md
+    ├── ai-operations.md
+    ├── troubleshooting.md
+    ├── publication-review.md
+    └── screenshots/
 ```
+
+Related documents: [architecture](architecture.md), [security design](security-design.md), [AI operations](ai-operations.md), [troubleshooting](troubleshooting.md), and [screenshots](screenshots/README.md).

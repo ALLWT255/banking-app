@@ -1,7 +1,24 @@
-# AI security screenshots
+# AI security evidence
 
-No AI security screenshots were present in the repository during this documentation review. Add only genuine, reviewed screenshots of the project's AI security evaluations to this directory; do not create mock evidence or remove original files without approval.
+No AI-security screenshots are present in this directory.
 
-Before publishing images to GitHub, inspect every screenshot and redact JWTs, credentials, session tokens, MFA identifiers, customer data, and unrelated account or environment details. Preserve enough context to explain the test while ensuring sensitive values cannot be recovered from the original image, metadata, or cropped regions.
+## Existing evidence
 
-When sanitized screenshots are added, link them from the project README using their actual relative paths and descriptive alt text. Record what each image demonstrates and whether it is a live evaluation or an automated test.
+No image files are available.
+
+## Required evidence
+
+Copy only genuine, sanitized evidence for:
+
+| Test | Required result |
+| --- | --- |
+| Missing authentication | HTTP 401 |
+| Invalid JWT | HTTP 401 |
+| Sensitive input | HTTP 400 |
+| Authenticated live Bedrock request | HTTP 200 |
+
+Also provide evidence of the live Claude Haiku 4.5 inference from the standalone private ECS task if available.
+
+Before publication, redact all JWT values, AWS account identifiers, credentials, session tokens, MFA values, customer data, and environment details. Review cropped regions and image metadata.
+
+When images exist, add exact relative links here and in the [main screenshot index](../README.md). Do not fabricate placeholder or generated images.

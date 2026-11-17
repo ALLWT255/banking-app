@@ -1,20 +1,32 @@
-# Deployment screenshots
+# Screenshot evidence index
 
-Place sanitized evidence here. No screenshots were present during documentation preparation, so the Banking App README embeds no images and links to no nonexistent image files.
+No screenshot files currently exist in this directory or in [docs/screenshots/ai-security/](ai-security/). This index links only to files that are actually present.
 
-| Suggested filename | Capture |
-| --- | --- |
-| `terraform-apply.png` | Completed summary: 34 added, 0 changed, 0 destroyed |
-| `ecr-image.png` | Repository, `dev` tag, digest and push time |
-| `ecs-service.png` | Service name, desired/running counts and deployment status |
-| `healthy-targets.png` | Two healthy port-8000 targets across both AZs |
-| `api-health.png` | HTTP health response with status and service name |
-| `swagger-ui.png` | Swagger showing the deployed health route |
+## Existing evidence
 
-Capture actual evidence, not mockups. Record capture dates and what each image proves. Crop credentials, passwords, MFA/session tokens, private terminal history, and unrelated account details. Review Console URLs/account identifiers before publication. Never capture full state, plan payloads, or environment files.
+No deployment screenshots are present.
 
-Once a file exists and is reviewed, embed it in the Banking App README using `docs/screenshots/<actual-filename>` and descriptive alt text. Match case exactly. Health evidence does not prove banking operations or database integration.
+## Evidence still required
 
-The verified deployment date is October 30, 2026. Compare ECR evidence with digest `sha256:3fe7c32bc744e6749cda39018f645680921555191b1ae3babc7dfd35cad8f57d`. Record the actual screenshot capture date separately if captured later. Store real images only in this directory; no placeholder images have been created.
+| Evidence category | Suggested capture | Current status |
+| --- | --- | --- |
+| Modular Terraform deployment | Applied resource summary or reviewed plan summary | Missing |
+| ECS and ALB infrastructure | ECS service desired/running tasks and ALB target status | Missing |
+| IAM troubleshooting | Sanitized role/policy or access-denied diagnosis | Missing |
+| RDS and migration | RDS private configuration and Alembic current/head evidence | Missing |
+| Database tables | Query output for `users`, `accounts`, `transactions`, and `alembic_version` | Missing |
+| Health validation | `/api/health` HTTP 200 | Missing |
+| Readiness validation | `/api/ready` HTTP 200 and database connected | Missing |
+| Bedrock integration | Task execution or application log showing live Claude Haiku inference exit 0 | Missing |
+| Bedrock IAM | Task role policy showing scoped inference-profile resources | Missing |
+| AI security testing | Sanitized four-result TestClient evidence | Missing in AI subdirectory |
 
-Stage 1 was torn down after deployment verification. Label historical screenshots as historical; do not imply the API is still running. Optional real cleanup evidence may show the final EIP deletion, an empty Terraform resource list, and the preserved ECR repository/image status. Never capture state payloads or credentials. These evidence files have not been supplied and no images were generated.
+Before publication, verify each image is genuine, record the capture date, crop credentials and session data, redact AWS account/resource identifiers, and review EXIF metadata.
+
+Do not copy Terraform state, saved plans, environment files, terminal secret values, or raw JWTs into screenshots.
+
+## Historical Stage 1
+
+Stage 1 evidence from October 30, 2026 remains historical: 34 Terraform resources, ECS/ALB health, and preserved ECR. It was torn down and must not imply current availability.
+
+Stage 2 evidence is from November 17, 2026 and should be labeled separately.

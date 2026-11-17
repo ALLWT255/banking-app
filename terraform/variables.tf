@@ -32,3 +32,8 @@ variable "enable_database" {
   type        = bool
   default     = false
 }
+variable "jwt_secret_arn" {
+  description = "ARN of the JWT signing key stored in AWS Secrets Manager"
+  type        = string
+  default     = null
+}

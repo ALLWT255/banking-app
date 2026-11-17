@@ -42,6 +42,43 @@ resource "aws_ecs_task_definition" "backend" {
       name      = "backend"
       image     = "${aws_ecr_repository.backend.repository_url}:dev"
       essential = true
+      environment = var.database_secret_arn != null ? [
+        {
+          name  = "DB_HOST"
+          value = var.db_host
+        },
+        {
+          name  = "DB_PORT"
+          value = tostring(var.db_port)
+        },
+        {
+          name  = "DB_NAME"
+          value = var.db_name
+        },
+        {
+          name  = "DB_SSL_ROOT_CERT"
+          value = "/app/certs/global-bundle.pem"
+        }
+      ] : []
+
+      secrets = concat(
+        var.database_secret_arn != null ? [
+          {
+            name      = "DB_USER"
+            valueFrom = "${var.database_secret_arn}:username::"
+          },
+          {
+            name      = "DB_PASSWORD"
+            valueFrom = "${var.database_secret_arn}:password::"
+          }
+        ] : [],
+        var.jwt_secret_arn != null ? [
+          {
+            name      = "JWT_SECRET_KEY"
+            valueFrom = var.jwt_secret_arn
+          }
+        ] : []
+      )
 
       portMappings = [
         {
@@ -127,6 +164,10 @@ resource "aws_ecs_service" "backend" {
   task_definition = aws_ecs_task_definition.backend.arn
   desired_count   = 2
   launch_type     = "FARGATE"
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
 
   network_configuration {
     subnets          = values(var.private_subnet_ids)
