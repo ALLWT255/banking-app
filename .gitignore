@@ -96,5 +96,8 @@ terraform.tfstate.d/
 # Local Bedrock testing payload
 backend/bedrock-test.json
 
+# Unredacted screenshot intake; publish only reviewed derivatives
+/docs/screenshots/banking-appdocsscreenshots/
+
 # Public AWS RDS certificate bundle
 !backend/certs/global-bundle.pem

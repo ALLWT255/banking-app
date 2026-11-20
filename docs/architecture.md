@@ -1,169 +1,134 @@
-# Architecture and Terraform Reference
+# Architecture and infrastructure reference
 
-## Overview
+## Scope and evidence
 
-This document describes the cloud architecture successfully deployed and validated on November 17, 2026, during Stage 2 of the Cloud-Native Banking Application project.
+This reference describes the Terraform modules and FastAPI implementation in this repository and the development deployment documented in project records/screenshots through November 20, 2026. It is not a claim that the resources remain deployed now. No production/regulatory readiness is claimed.
 
-The architecture combines modular Terraform infrastructure, private containerized services, encrypted relational storage, centralized secrets management, and generative AI through Amazon Bedrock.
-
-The environment is designed for development and portfolio demonstration rather than production financial workloads.
-
-## AWS Architecture
+## Logical architecture
 
 ```mermaid
 flowchart TB
-    Client["Internet Clients"]
-    ECR["Amazon ECR"]
-    Secrets["AWS Secrets Manager"]
-    Logs["Amazon CloudWatch Logs"]
-    Bedrock["Amazon Bedrock - Claude Haiku 4.5"]
+    Client["API client / engineer"]
+    ALB["Internet-facing ALB<br/>dev HTTP:80; optional HTTPS with ACM"]
+    ECR["ECR<br/>mutable dev tag"]
+    SM["Secrets Manager"]
+    CW["CloudWatch Logs"]
+    BR["Bedrock Runtime<br/>Claude Haiku 4.5"]
+    NAT["One NAT Gateway"]
 
-    subgraph VPC["VPC - 10.0.0.0/16 - us-east-1"]
-        IGW["Internet Gateway"]
-        ALB["Public Application Load Balancer"]
-
-        subgraph AZA["Availability Zone us-east-1a"]
-            PublicA["Public Subnet - 10.0.1.0/24"]
-            NATA["NAT Gateway + Elastic IP"]
-            PrivateA["Private Subnet - 10.0.11.0/24"]
-            TaskA["Fargate Backend Target"]
-        end
-
-        subgraph AZB["Availability Zone us-east-1b"]
-            PublicB["Public Subnet - 10.0.2.0/24"]
-            PrivateB["Private Subnet - 10.0.12.0/24"]
-            TaskB["Fargate Backend Target"]
-        end
-
-        RDS[("Private RDS PostgreSQL - Single AZ")]
-        PrivateRT["Private Route Table"]
-        PublicRT["Public Route Table"]
-
-        ALB --- PublicA
-        ALB --- PublicB
-
-        PublicA --- PublicRT
-        PublicB --- PublicRT
-        PublicRT --> IGW
-
-        PublicA --- NATA
-        PrivateA --- TaskA
-        PrivateB --- TaskB
-
-        ALB -->|HTTP 8000| TaskA
-        ALB -->|HTTP 8000| TaskB
-
-        TaskA -->|PostgreSQL TLS 5432| RDS
-        TaskB -->|PostgreSQL TLS 5432| RDS
-
-        TaskA --> PrivateRT
-        TaskB --> PrivateRT
-        PrivateRT --> NATA
-        NATA --> IGW
+    subgraph VPC["VPC - two Availability Zones"]
+      IGW["Internet Gateway"]
+      subgraph Public["Public subnets"]
+        ALB
+        NAT
+      end
+      subgraph Private["Private subnets"]
+        ECS["ECS Fargate service<br/>desired count: 2<br/>container port: 8000"]
+        RDS[("RDS PostgreSQL<br/>private, encrypted, Single-AZ")]
+      end
+      ALB -->|"HTTP port 8000"| ECS
+      ECS -->|"TLS port 5432"| RDS
+      ECS -->|"egress HTTPS"| NAT
+      NAT --> IGW
+      ALB --> IGW
     end
-
-    Client -->|Development HTTP 80| ALB
-
-    IGW <-->|HTTPS| Bedrock
-    IGW <-->|HTTPS| ECR
-    IGW <-->|HTTPS| Secrets
-    IGW -->|HTTPS| Logs
+    Client --> ALB
+    ECR -->|"image pull"| ECS
+    SM -->|"startup secret injection"| ECS
+    ECS -->|"task-role InvokeModel"| BR
+    ECS --> CW
 ```
 
-The diagram represents logical connectivity and intended workload distribution. ECS manages task placement across the available private subnets; Terraform does not assign a fixed task to each Availability Zone.
+The Application Load Balancer is public; application tasks and RDS are not. ECS tasks use `awsvpc`, private subnets, and `assign_public_ip = false`. The NAT Gateway provides outbound access; it does not carry inbound client traffic.
 
-The RDS subnet group spans both private subnets, but the database instance itself is Single-AZ.
+## Terraform organization
 
-## 1. Networking Architecture
-
-### Virtual Private Cloud
-
-| Configuration | Value |
+| Module | Responsibility |
 | --- | --- |
-| Region | us-east-1 |
-| VPC CIDR | 10.0.0.0/16 |
-| Availability Zones | us-east-1a, us-east-1b |
-| DNS resolution | Enabled |
-| Public subnets | 2 |
-| Private subnets | 2 |
-| NAT Gateways | 1 |
-| Internet Gateways | 1 |
+| `terraform/modules/vpc` | VPC, public/private subnets, Internet Gateway, EIP/NAT Gateway, route tables and associations |
+| `terraform/modules/security` | ALB, backend, and database security groups and ingress/egress rules |
+| `terraform/modules/iam` | ECS execution/task roles, secret reads, model invocation policy |
+| `terraform/modules/database` | RDS PostgreSQL and private DB subnet group |
+| `terraform/modules/compute` | ECS cluster/task/service, ECR, CloudWatch log group, ALB/listeners/target group |
 
-### Subnet Allocation
+The root `terraform/main.tf` composes modules and passes resource outputs as inputs. The database depends on private subnet/security-group outputs; the IAM module receives the database secret ARN; compute receives the role ARNs, network/security-group IDs, database endpoint, and secret ARNs. The explicit `depends_on` on compute keeps role/network setup ahead of service provisioning.
 
-| Subnet | CIDR | Availability Zone |
+Modules isolate concerns and allow the same component code to be parameterized. They do not alone create environment isolation, reusable state, safe CI/CD, or environment-specific AWS identities.
+
+## Environment configuration and deployment status
+
+| Environment | Repository evidence | Status |
 | --- | --- | --- |
-| Public A | 10.0.1.0/24 | us-east-1a |
-| Public B | 10.0.2.0/24 | us-east-1b |
-| Private A | 10.0.11.0/24 | us-east-1a |
-| Private B | 10.0.12.0/24 | us-east-1b |
+| Development | Local ignored `terraform/environments/dev/terraform.tfvars`; deployment records/screenshots for Stage 1 and Stage 2 | Deployed and validated at recorded points; current live state not checked |
+| Staging | No tracked configuration or deployment evidence | Prepared only in the sense that variables/modules can be reused; not an implemented environment |
+| Production | No tracked configuration or deployment evidence | Not deployed; production requirements are future work |
 
-Public subnets support internet-facing infrastructure, while private subnets host backend services and database resources.
+`terraform/providers.tf` currently hardcodes `us-east-1` and the local profile `banking-terraform-role`. No tracked environment tfvars, remote backend, workspace/account separation, environment promotion, or production pipeline is present. `enable_dev_http_listener` defaults to false, but that does not make an environment production-ready. The development variable file is ignored and must stay local.
 
-### Routing
+## VPC, subnets, routes, and outbound dependencies
 
-Public subnet routing:
+The VPC uses DNS support/hostnames and two public and two private subnets, one per configured Availability Zone. Public route tables send `0.0.0.0/0` to an Internet Gateway. Private route tables send default egress through one NAT Gateway in the first public AZ. Public subnet instances can receive public IPv4 addresses; private ECS tasks cannot.
 
-```text
-0.0.0.0/0 → Internet Gateway
-```
+The ALB attaches to both public subnets. ECS tasks and the RDS subnet group use the private subnets. The RDS instance itself is configured `multi_az = false`, so a two-AZ DB subnet group does not make the instance Multi-AZ.
 
-Private subnet routing:
+The shared NAT provides task egress to ECR, CloudWatch, Secrets Manager, Bedrock, and other AWS APIs over HTTPS. This creates a single egress dependency and can incur cross-AZ data transfer when tasks in the other AZ use it. VPC endpoints can reduce NAT dependency/cost for supported services, subject to service coverage and endpoint cost.
 
-```text
-0.0.0.0/0 → NAT Gateway
-```
+## Traffic flow and trust boundaries
 
-The NAT Gateway resides in the first public subnet and provides outbound connectivity for both private subnets.
+1. A client reaches the public ALB listener. The development HTTP listener is conditional and public; an HTTPS listener is created only when an ACM ARN is configured.
+2. The ALB forwards to IP targets on TCP 8000. Target health checks use `GET /api/health`, HTTP 200, 30-second intervals, 5-second timeout, and configured healthy/unhealthy thresholds of 2/3.
+3. ECS task security groups accept port 8000 from the ALB security group, not arbitrary client CIDRs.
+4. The application opens PostgreSQL TLS connections to RDS on port 5432. The RDS security group allows ingress from the backend security group only.
+5. The task security group permits outbound HTTPS and database traffic. There is no public IP on the task or public route from the database.
+6. ECS retrieves container secrets during startup using its execution role. Runtime Bedrock calls use the separate application task role.
 
-Private ECS tasks use outbound HTTPS to access services including:
+The security-group module opens ALB ingress on 443, but an HTTPS listener exists only when a certificate ARN is supplied. The documented development deployment has no configured certificate/listener and exposes HTTP; an open SG rule is not proof of HTTPS.
 
-- Amazon ECR.
-- Amazon CloudWatch.
-- AWS Secrets Manager.
-- Amazon Bedrock.
+## ECS, ECR, load balancing, and logs
 
-Inbound application traffic reaches ECS through the Application Load Balancer, not through the NAT Gateway.
+The compute module defines Fargate with `awsvpc`, 256 CPU units, 512 MiB memory, desired count two, and port 8000. The service uses private subnets, a 60-second health-check grace period, and an ECS deployment circuit breaker with rollback enabled.
 
-### Networking Trade-Off
+ECR has scan-on-push enabled but uses mutable tags; the task definition points at `:dev`. Updating that tag alone does not force a new deployment or pin a running release to an immutable digest. No image-signing or CI/CD gate is configured.
 
-A single NAT Gateway reduces development infrastructure costs but introduces a shared egress dependency and potential cross-AZ data transfer charges.
+CloudWatch receives container stdout/stderr in `/ecs/<project>-backend`, with seven-day retention. The repository does not configure a full application metrics/alarms/tracing program.
 
-A production architecture should evaluate redundant NAT Gateways and applicable AWS VPC endpoints.
+## RDS, migrations, and secrets
 
-## 2. Application Load Balancer
+The RDS module creates PostgreSQL on gp3 with 20 GB default storage, encryption at rest, `publicly_accessible = false`, Single-AZ deployment, one-day backup retention, and `skip_final_snapshot = true`. AWS manages the master-user password and provides its secret ARN to ECS. This is suitable only as a cost-conscious disposable development profile, not a durable customer-data configuration.
 
-The internet-facing Application Load Balancer distributes incoming application traffic across registered ECS task IP addresses.
+The API uses SQLAlchemy and Alembic. Migrations were executed through standalone ECS tasks in the private network; the application image includes Alembic files. Schema creation is not automatically run on every process start. The application receives connection fields and secret JSON fields through ECS secret injection. The RDS public CA bundle is included at `backend/certs/global-bundle.pem`; in the ECS deployment `verify-full` uses this CA bundle.
 
-| Configuration | Value |
-| --- | --- |
-| Listener | HTTP 80 |
-| Target type | IP |
-| Backend port | 8000 |
-| Health check | /api/health |
-| Health matcher | HTTP 200 |
-| Health check interval | 30 seconds |
-| Health check timeout | 5 seconds |
-| Healthy threshold | 2 |
-| Unhealthy threshold | 3 |
+## IAM roles
 
-The ALB spans both public subnets.
+| Identity | Intended responsibility | Current permissions evidenced in source |
+| --- | --- | --- |
+| ECS execution role | Pull image, initialize task, publish logs, inject configured secrets | AWS ECS task execution policy plus `GetSecretValue` for the specified DB and JWT secret ARNs |
+| ECS application task role | AWS API calls made by running code | `bedrock:InvokeModel` scoped to the configured Haiku US inference profile and associated regional foundation-model resources |
+| Terraform deployer | Provision and update infrastructure | Local named profile; policy is external to this repository |
+| Image publisher | Push image from workstation | Separate deployment-time ECR identity; not the ECS application role |
 
-An optional HTTPS listener exists in the compute module, but the development deployment does not provide an ACM certificate.
+The application has no autonomous infrastructure mutation capability. Verify effective permission boundaries, SCPs, KMS key policies, and external policies separately; a Terraform statement alone does not establish effective authorization.
 
-Public HTTP is intended only for development connectivity and non-sensitive health validation.
+## Availability and cost posture
 
-Authentication credentials and financial information must not be transmitted over this development HTTP listener.
+Two public/private subnet pairs and two desired Fargate tasks provide a placement/failover option across AZs, and the ALB can route around unhealthy targets. They do not guarantee capacity or eliminate shared failures. One NAT Gateway and a Single-AZ RDS instance remain availability dependencies. No current service state, SLO, failover test, backup restore test, or recovery objective is asserted.
 
-## 3. ECS Fargate Compute
+Primary recurring cost drivers are NAT hours/data processing, public ALB hours/capacity, Fargate vCPU/memory/runtime, RDS instance/storage/backups, public IPv4, ECR storage, Secrets Manager, CloudWatch ingestion/retention, and Bedrock token usage. A single NAT and small Single-AZ RDS lower development cost but trade away resilience. See [engineering tradeoffs](engineering-tradeoffs.md).
 
-The backend runs as an ECS Fargate service.
+## Readiness gaps
 
-| Configuration | Value |
-| --- | --- |
-| Launch type | Fargate |
-| Network mode | awsvpc |
-| Desired task count | 2 |
-| CPU per task | 256 CPU units |
-| Memory per task | 512 MiB |
-| Container port | 8000 |
+- No HTTPS certificate/listener in the evidenced development environment.
+- No Multi-AZ RDS, tested point-in-time recovery, final snapshot policy, or documented RPO/RTO.
+- One shared NAT Gateway and local Terraform state without remote locking.
+- Mutable `dev` image reference; no automated build/release pipeline.
+- RDS master-user credentials injected into the app rather than a restricted application DB role.
+- Seven-day logs without demonstrated alarms, metrics, tracing, WAF, or rate limiting.
+- No tracked staging/production configuration or verified production deployment.
+
+## Related documentation
+
+- [Security design](security-design.md)
+- [AI operations](ai-operations.md)
+- [Tradeoffs](engineering-tradeoffs.md)
+- [Troubleshooting](troubleshooting.md)
+- [Screenshot evidence](screenshots/README.md)

@@ -1,89 +1,43 @@
-# Deployment troubleshooting
+# Troubleshooting and incident index
 
-The owner confirmed the following troubleshooting work for the October 30, 2026 deployment:
+This index separates recorded failures, controlled break/fix exercises, and unresolved hypotheses. All dates/times below come from visible screenshot dates only where explicitly stated. No outage duration, customer impact, or current AWS status is inferred.
 
-- IAM/ECR permissions were addressed for the deployment and image-publishing workflow.
-- Temporary MFA session credentials were used.
-- Docker ECR login from Windows PowerShell used `cmd /c` to execute the AWS CLI-to-Docker pipeline.
+## Evidence-backed incident reports
 
-The exact error transcripts, policy changes, and publisher profile were not supplied, so this guide does not invent them. Diagnostic advice below is distinct from that confirmed history. No AWS commands were run during documentation preparation.
+| Topic | Observed state | Recovery status | Detailed report |
+| --- | --- | --- | --- |
+| Invalid AWS session / Terraform IAM denies | Invalid-session and provisioning permission errors indicated in screenshot names and deployment sequence | Later role/session validation and Terraform apply are recorded | [AWS session and Terraform permissions](incidents/aws-session-and-terraform-permissions.md) |
+| KMS metadata permission | KMS denial indicated by image names; later permission/key-state evidence | Partial; no correlated RDS result | [KMS permission](incidents/kms-permission.md) |
+| ALB 503 / target drain | HTTP 503, two targets draining and none healthy | Health and DB readiness both HTTP 200 on Nov 18 | [ALB 503 recovery](incidents/alb-503-recovery.md) |
+| ECS startup failure | CloudWatch log reports an ASGI import failure for `app.invalid`; later logs show startup complete | Later process startup is recorded; exact corrective change and service-wide readiness are unknown | [ECS startup failure](incidents/ecs-startup.md) |
+| PostgreSQL/Alembic authentication | `FATAL: password authentication failed for user "bankadmin"` | Later migration/head evidence; exact fix not correlated | [Database connectivity and migrations](incidents/database-connectivity-and-migrations.md) |
+| Migration connection timeout | `ConnectionTimeout` / `connection timeout expired` in task logs | Later migration succeeded; original cause unproven | [Database connectivity and migrations](incidents/database-connectivity-and-migrations.md) |
+| RDS connection closed | Nov 19 log shows private DB connection closed unexpectedly | Follow-up screenshot label suggests SG change; no same-task readiness proof | [RDS security-group connectivity](incidents/rds-security-group-connectivity.md) |
+| Secrets Manager denial | Access-denied screenshot by filename; later task startup screenshot | Indication only; role/task correlation incomplete | [Secrets Manager access](incidents/secrets-manager-access.md) |
+| Bedrock `InvokeModel` denied | Empty test task role and denial sequence | Later analysis and AI API checks recorded | [Bedrock permission](incidents/bedrock-task-role-permission.md) |
+| AI authentication/input/output checks | 401/400/200 cases in source tests and cloud screenshot | Expected security behavior, not an outage | [AI operations](ai-operations.md) |
 
-The verified outcome was 34 resources added, 0 changed, 0 destroyed; ECR tag `dev`; two healthy targets across `us-east-1a` and `us-east-1b`; successful health JSON and Swagger UI. The verified ECR digest is `sha256:3fe7c32bc744e6749cda39018f645680921555191b1ae3babc7dfd35cad8f57d`. See the [deployment record](../README.md#verified-deployment).
+## Triage sequence
 
-## MFA and temporary credentials
+1. **Identify scope:** process health (`/api/health`), DB readiness (`/api/ready`), ALB status/target reason, or AI provider response.
+2. **Capture time and version:** UTC timestamp, ECS task definition/release digest, deployment events, and exact non-secret error. Do not expose JWTs, secret values, AWS session tokens, customer data, or full secret/resource ARNs.
+3. **Check edge and target health:** ALB listener/rule, target type/IP port 8000, health path `/api/health`, registered target state/reason, ECS desired/running count, and service events.
+4. **Check container startup:** task stop reason/exit code, image digest, Uvicorn bind to `0.0.0.0:8000`, required environment/secret injection, memory/CPU, and CloudWatch logs.
+5. **Check DB separately:** RDS state/endpoint, private routes, task/RDS security-group relationship on TCP 5432, CA path/TLS mode, then credentials. A timeout, TLS failure, and password rejection are different diagnoses.
+6. **Check AWS API permissions:** determine execution role vs application task role; capture exact action/resource/principal, region, and service. Check key/resource policies and organization controls.
+7. **Recover cautiously:** use a reviewed Terraform plan or controlled service deployment; avoid granting broad permissions or changing infrastructure from model recommendations.
+8. **Validate and close:** verify task health, target health, `/api/health`, `/api/ready`, and a scoped authorized workflow; record what was not verified.
 
-Expired or incomplete sessions can prevent CLI/Terraform requests. Temporary credentials require an access key, secret key, and session token; an MFA code is not a session token. Renew using the approved local MFA/role workflow and keep returned values out of source, screenshots, and shared terminal output. See [AWS temporary credentials](https://docs.aws.amazon.com/cli/latest/reference/sts/get-session-token.html).
+## Incident response learning
 
-Terraform selects profile `banking-terraform-role`; CLI commands using another profile may use another identity. Confirm intended profile and local environment overrides without printing secrets. A profile name does not prove its effective role. Credential renewal and role trust configuration are different operations; this guide does not change either.
+The documented work demonstrates IAM and temporary-credential diagnosis, network and health-check reasoning, Terraform partial-deployment recovery, separation of startup and runtime roles, PostgreSQL migration troubleshooting, and human-supervised AI analysis. This is evidence of development practice—not a measured SRE service level, real customer outage, or production response exercise.
 
-## ECR permissions
+## Evidence not verified
 
-Repository creation, workstation publishing, and ECS pulling need different permissions. Publishing normally requires `ecr:GetAuthorizationToken` on `*`, and `ecr:BatchCheckLayerAvailability`, `ecr:InitiateLayerUpload`, `ecr:UploadLayerPart`, `ecr:CompleteLayerUpload`, `ecr:PutImage`, and `ecr:BatchGetImage` on `arn:aws:ecr:us-east-1:<AWS_ACCOUNT_ID>:repository/banking-app-dev-backend`. Read-back checks need their own read permissions. See [AWS image publishing](https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-push-iam.html).
+- No primary evidence supports a specific RDS backup-retention failure or correction. The current module sets one-day retention and `skip_final_snapshot = true`.
+- No evidence confirms SQLAlchemy URL password masking/escaping as the root cause of the PostgreSQL authentication error. The source uses `URL.create`; exact deployed credential handling remains unknown.
+- The ECS startup log explicitly reports `Could not import module "app.invalid"`; a later log reports startup complete and Uvicorn listening on port 8000, but the exact change and ALB recovery are not shown.
+- Secrets Manager follow-up evidence does not establish a same-role, same-task permission recovery.
+- A screenshot labeled `11-rds-kms-key-not-accessible.png` is an exact byte-for-byte duplicate of `09-terraform-partial-deployment-recovery-plan.png`; it is not independent KMS evidence.
 
-Match access-denied errors to the exact action, principal, region, and repository. Do not assume repository-management permissions include image publishing. The ECS execution role is for pulls/logging, not workstation publishing. Review effective policies, boundaries, and organization restrictions with the account owner rather than adding administrator access. The identity and exact permission changes used for the successful push still need to be recorded.
-
-## Docker login on Windows PowerShell
-
-Use Docker Desktop's Linux engine. PowerShell variables and continuation syntax differ from Bash. Authenticate to the registry host without the repository path/tag, using `--password-stdin`. The [project workflow](../README.md#deployment-workflow) documents the confirmed `cmd /c` workaround. An illustrative command, using a locally configured profile named `approved-publisher`, is:
-
-```powershell
-cmd /c "aws ecr get-login-password --region us-east-1 --profile approved-publisher | docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com"
-```
-
-Replace `<AWS_ACCOUNT_ID>` with your account ID and `approved-publisher` with the actual authorized local profile before running the example. Angle-bracket placeholders are documentation only; cmd.exe interprets them as redirection if left unchanged. This is a reusable example, not the recorded literal command or profile from the deployment. `cmd /c` executes the pipeline in cmd.exe from PowerShell and passes the password over stdin. Its pipeline exit status reflects Docker, so also inspect AWS CLI failures. No token is printed or placed directly in command arguments. The confirmed use of this workaround does not establish the original failure's exact root cause.
-
-Stop when token retrieval fails. A downstream non-interactive-login error can result from an empty password. Check profile, session expiration, region, and Docker availability. Never echo the ECR password or pass it as a visible command-line password. See the [AWS CLI publishing workflow](https://docs.aws.amazon.com/AmazonECR/latest/userguide/getting-started-cli.html).
-
-## Build and image push
-
-Use `backend/` from the Banking App project root as the Docker build context; the Dockerfile copies `requirements.txt` and `app/`. Tag with the full registry/repository/tag and confirm the repository exists. Successful login does not prove layer-upload or manifest-write permission.
-
-For image-pull failures, check that `dev` exists, review ECS stopped-task reasons, execution-role permissions, and NAT routing. Check image compatibility with the task runtime when building on a different CPU architecture; the task definition does not explicitly set architecture. Overwriting a mutable tag does not replace running tasks. A rollout is a separate, explicitly authorized deployment operation.
-
-## ECS health verification
-
-In an authorized Console session, inspect:
-
-1. Cluster `banking-app-dev-cluster` and service `banking-app-dev-backend-service`: desired/running counts, deployment status, events, stopped-task reasons.
-2. ECR `banking-app-dev-backend`: `dev` tag/digest; compare with running tasks when investigating an older image.
-3. Target group `banking-app-dev-tg`: health/reason codes, private target IPs on 8000, and AZ placement.
-4. CloudWatch `/ecs/banking-app-dev-backend`: startup/request errors within seven-day retention.
-
-For timeouts, check security groups and Uvicorn binding to `0.0.0.0:8000`. For HTTP failures, verify `/api/health` and status 200. The 60-second ECS grace period suppresses early health reactions; it does not make an unhealthy target healthy. See [AWS load-balancer health checks](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/load-balancer-healthcheck.html).
-
-An operator can substitute the actual ALB DNS name:
-
-```powershell
-$AlbDnsName = '<actual-alb-dns-name>'
-Invoke-RestMethod -Uri "http://${AlbDnsName}/api/health"
-# Open http://<actual-alb-dns-name>/docs in a browser.
-```
-
-Expected JSON: `{"status":"healthy","service":"banking-api"}`. Swagger should show health. Accounts/transactions returning 404 is consistent with current startup registering only health. Port 443 allowed in a security group does not establish HTTPS: no certificate is passed and no HTTPS listener is active.
-
-## State and remaining evidence
-
-Saved plan artifacts may reflect older database-enabled configuration. Do not treat them as current deployment evidence or reapply them without review. Stage 2 RDS and Bedrock integration are verified as November 17, 2026 deployment results. Preserve state privately and create fresh reviewed plans for future changes.
-
-Still to record: detailed incident reports and break/fix documentation for separate future work. The date, ECR digest, temporary MFA credential use, and `cmd /c` workaround are confirmed. Stage 2 RDS and Bedrock functionality are verified, while public HTTPS and production banking operations remain outside the implemented scope. No screenshot or claim of a running task digest is inferred from the ECR digest alone.
-
-## Teardown and preserved ECR
-
-The owner confirmed this teardown incident and outcome:
-
-1. The deployment role lacked `ec2:DisassociateAddress`, blocking completion of the EIP cleanup.
-2. That permission was added to the deployment role.
-3. The final EIP was destroyed and Terraform state became empty.
-4. The ECR repository `banking-app-dev-backend`, containing image tag `dev`, was verified as ACTIVE after teardown.
-
-These are owner-confirmed results, not AWS operations performed during this publication review. The exact permission statement/scope and teardown timestamp have not been supplied. No policy was changed by this review.
-
-The ECR repository was removed from Terraform state to preserve it during destroy. Removing an object from state does not remove its resource block or import it automatically later. `terraform/modules/compute/main.tf` still declares `aws_ecr_repository.backend`; the task definition still references its repository URL with `:dev`. Before a future normal apply, an authorized operator must re-import the preserved repository into the correct workspace/state. From the project's `terraform/` directory, after initialization and restoration of the local dev variable file:
-
-```powershell
-terraform import -var-file=environments/dev/terraform.tfvars module.compute.aws_ecr_repository.backend banking-app-dev-backend
-```
-
-This is documentation only; it was not executed. Verify account, region, workspace, and existing state membership first. Then generate and review a fresh plan, confirming ECR is retained without replacement or deletion. Do not apply an old saved plan. Import brings the repository back under Terraform management, so future destruction requires another deliberate retention decision. Repository/image storage costs can continue despite empty Terraform state.
-
-The import identifier is the repository name, as documented by the [AWS provider ECR resource reference](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ecr_repository). Empty Terraform state alone does not establish that every AWS resource in the account was removed. The health endpoint and Swagger results above are historical Stage 1 evidence, not current availability claims.
+See the [incident report index](incidents/README.md), [architecture](architecture.md), [AI operations](ai-operations.md), and [screenshot index](screenshots/README.md).

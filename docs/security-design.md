@@ -1,215 +1,115 @@
-# Security design
+# Security design and verification
 
-This document describes controls implemented in source and Terraform and separates them from verified testing and future improvements.
+## Security scope
 
-## Security context
+This is a development portfolio application, not a production bank or a regulated/compliant service. It has no verified real-money payment rail, full ledger, production identity lifecycle, or independent security assessment. Controls below describe source configuration and dated validation, not a guarantee of security.
 
-This is a development and portfolio environment, not a production bank platform. Controls are not claimed to provide regulatory compliance or complete resistance to prompt injection.
-
-## Deployment identity
-
-Terraform was operated by the deployer using MFA-backed temporary AWS credentials and an approved named deployment identity. Temporary credentials must be renewed when sessions expire. The deployment workflow also distinguishes the Terraform identity from the workstation ECR publisher identity.
-
-Recommended practice remains MFA, short-lived credentials, least-privilege deployment policy, CloudTrail auditing, and no credentials in source or screenshots.
-
-## IAM role separation
+## Identity and trust boundaries
 
 ```mermaid
 flowchart LR
-    ECS[ECS task] --> ER[ECS execution role]
-    ECS --> TR[Application task role]
-    ER --> ECR[Pull ECR images]
-    ER --> CW[Publish CloudWatch logs]
-    ER --> SMDB[Get database secret]
-    ER --> SMJWT[Get JWT secret]
-    TR --> BR[Bedrock InvokeModel]
+    Operator["Human / CI identity"] -->|Short-lived auth recommended| TF["Terraform deployer"]
+    Client["API client"] -->|Development HTTP:80| ALB["Public ALB"]
+    ALB -->|Port 8000| ECS["Private ECS task"]
+    ECS -->|TLS 5432| RDS["Private RDS"]
+    ECS -->|Task role: InvokeModel| BR["Bedrock"]
+    Exec["ECS execution role"] -->|ECR, logs, startup secrets| ECS
+    Task["ECS application task role"] -->|Bedrock only in app code| BR
 ```
 
-[iam/main.tf](../terraform/modules/iam/main.tf) defines separate ECS execution and application task roles:
+The public listener is an internet boundary; the service and database are private network boundaries; AWS API access is an IAM boundary; application registration/JWT checks are an API boundary. Screenshots of individual controls do not establish end-to-end authorization or safety.
 
-| Role | Implemented permissions |
+## Deployment identity and Terraform
+
+Terraform's provider currently selects local profile `banking-terraform-role` in `us-east-1`. The deployment workflow/history documents MFA-backed temporary credentials; the policy attached to that operator is external to this repository. A profile name alone does not establish its effective principal or permissions.
+
+Use approved short-lived federation/MFA credentials, verify the intended account and role before planning, and keep tokens outside source, command output, screenshots, and shared logs. Current local Terraform state is not remotely encrypted/locked by repository configuration. No CI identity, account isolation, or staging/production deployment is evidenced.
+
+## ECS role separation
+
+| Role | Source-configured responsibility |
 | --- | --- |
-| Execution role | ECS managed execution policy; database and JWT `secretsmanager:GetSecretValue` on specific secret ARNs |
-| Application task role | `bedrock:InvokeModel` for the Claude Haiku US inference profile and associated US foundation-model resources |
-| Workstation publisher | Separate push-time ECR permissions; not granted to the ECS task |
+| ECS execution role | AWS ECS task execution policy, image pull/log delivery, and `secretsmanager:GetSecretValue` for the supplied database and JWT secret ARNs |
+| ECS application task role | `bedrock:InvokeModel` scoped to the Claude Haiku US inference profile and associated regional foundation model resources |
+| Terraform deployer | Provision infrastructure using the named local profile; exact effective policy is not tracked |
+| Workstation image publisher | Separate identity for pushing ECR images; no static publisher key is configured in the app |
 
-The Bedrock policy is model-scoped and does not grant broad AWS administration.
+ECS uses task-role credentials rather than static AWS keys in the application. The AI model itself is not granted an AWS role, tool, or resource mutation function. Verify IAM permission boundaries, resource policies, KMS policies, SCPs, and regional model access in addition to the Terraform policy document.
 
-## Secrets and credentials
+## Network and data protection
 
-RDS uses `manage_master_user_password=true` in [database/main.tf](../terraform/modules/database/main.tf). AWS manages the master secret in Secrets Manager and Terraform passes the secret ARN to ECS.
+- ALB ingress is public on development HTTP port 80 when enabled; the security-group module also permits 443. An HTTPS listener is conditional on an ACM certificate ARN and is not evidenced in the development deployment.
+- The ALB security group can send TCP 8000 to the backend security group. The task has no public IP.
+- The backend security group can send PostgreSQL 5432 to the database security group; the database accepts ingress only from the backend security group. RDS is not publicly accessible.
+- ECS egress allows HTTPS through a shared NAT Gateway for AWS APIs. This is outbound connectivity, not an inbound application path.
+- RDS storage is encrypted at rest; the database is Single-AZ with one-day backup retention, and Terraform configures `skip_final_snapshot = true`.
+- ECS receives database and JWT secret values from Secrets Manager at startup. RDS manages the master password, but the application currently receives that master-user credential instead of a separately restricted application user.
+- The app uses `verify-full` with `backend/certs/global-bundle.pem` when configured. ECS sets this certificate path. `database.py` falls back to `sslmode=require` if no CA path is supplied; this fallback does not verify the server identity.
 
-The ECS task injects:
+The CA bundle is a public AWS trust bundle and must remain in the repository. It is not a private key.
 
-- `DB_USER` and `DB_PASSWORD` from the RDS master secret.
-- `JWT_SECRET_KEY` from the configured JWT secret ARN.
-- `DB_HOST`, `DB_PORT`, `DB_NAME`, and the local RDS CA bundle path.
+## API authentication and passwords
 
-The JWT signing key has not been claimed or confirmed as rotated. Local tests use synthetic placeholder secrets.
+`backend/app/core/security.py` requires `JWT_SECRET_KEY` at import/startup, creates HS256 JWTs with a 30-minute expiration, and rejects invalid signatures/subjects/expiry. Account, transaction, and AI routes depend on bearer authentication. Password hashes use `pwdlib.PasswordHash.recommended()`; the configured dependency supports Argon2-capable hashing.
 
-## Private networking
+No evidence establishes JWT key rotation, revocation lists, MFA for application users, HTTPS transport, or a production session lifecycle. An HTTP bearer token is exposed to network observers unless transported over TLS; therefore the development HTTP listener must not carry real credentials or sensitive financial data.
 
-```mermaid
-flowchart TB
-    User[Client] -->|Development HTTP:80| ALB[Public ALB]
-    ALB -->|Port 8000| SGApp[Backend security group]
-    SGApp --> ECS[Private ECS Fargate tasks]
-    ECS -->|TLS 5432| SGRDS[Database security group]
-    SGRDS --> RDS[(Private RDS PostgreSQL)]
-    ECS -->|HTTPS 443| NAT[Shared NAT Gateway]
-    NAT --> AWS[AWS services and Bedrock]
-```
+## Container and supply chain
 
-[security/main.tf](../terraform/modules/security/main.tf) implements reference-based security groups:
+The backend Dockerfile runs as UID 10001, uses port 8000, and includes the RDS CA bundle. ECR scan-on-push is enabled. The task definition points at mutable `:dev`, and no image signing, digest pinning, vulnerability gate, or CI/CD release control is configured.
 
-| Source | Destination | Control |
+## AI data handling
+
+The AI endpoint checks authentication and input length before Bedrock. Input checks match selected AWS access key, bearer-token, and password-assignment patterns. The service JSON-serializes operational text, separates the system prompt, and labels the user content untrusted. Output validation checks the same small set of sensitive patterns and certain explicit claims about disabling CloudTrail or deleting a database.
+
+These are defense-in-depth checks, not complete DLP or prompt-injection prevention. They may miss secrets or unsafe paraphrases and may reject benign text. Do not send customer records, balances, credentials, JWTs, or confidential incident details. The assistant has no tool call or AWS mutation path.
+
+## Verification status
+
+| Control or check | Status | Evidence/limitation |
 | --- | --- | --- |
-| Internet | ALB | HTTP port 80 for development; optional HTTPS 443 only with a configured certificate |
-| ALB | ECS | Port 8000 only |
-| ECS | RDS | PostgreSQL port 5432 only |
-| ECS | Internet via NAT | HTTPS port 443 for AWS APIs |
+| Private ECS and private RDS | Implemented; deployment evidence recorded | No current live AWS check in this documentation task |
+| RDS storage encryption | Configured in Terraform | Single-AZ and one-day backup retention |
+| RDS TLS identity verification | Configured for ECS | Local fallback is `sslmode=require` without CA path |
+| Secrets Manager-backed DB/JWT values | Configured in task definition | Master DB secret used by app; rotation not verified |
+| Execution/task role separation | Implemented in Terraform | Effective permissions also depend on external AWS policy layers |
+| Scoped Bedrock invocation | Implemented in task-role policy | Model/provider availability and quota remain dependencies |
+| JWT and password hashing | Implemented in source | No public authenticated TLS workflow verified |
+| AI input/output validation | Implemented in source | Pattern/prompt checks are incomplete by design |
+| Missing JWT / invalid JWT / sensitive input / valid AI request | Recorded cloud results 401/401/400/200 | Synthetic JWT generated inside a private Fargate test task |
+| November 20 prompt-injection test | Recorded request returned 200; curated status log does not include the response body | One prompt case is not a resistance guarantee |
+| HTTPS | Not configured in recorded development deployment | ACM ARN/listener required |
+| Multi-AZ database, tested restore, WAF, alarms, CI/CD | Not evidenced | Future work |
 
-ECS tasks have `assign_public_ip=false`. RDS has `publicly_accessible=false`.
+## Threat considerations
 
-## RDS encryption and TLS
-
-[database/main.tf](../terraform/modules/database/main.tf) configures:
-
-- `storage_encrypted=true`
-- Private RDS subnet group
-- No public accessibility
-- Single-AZ deployment
-- One-day backup retention
-- Backend security-group-only database ingress
-
-The application database URL uses `verify-full` and `sslrootcert=/app/certs/global-bundle.pem` when the certificate path is configured. [database.py](../backend/app/db/database.py) falls back to `sslmode=require` if no certificate path is supplied.
-
-The public AWS RDS CA bundle is intentionally retained at [global-bundle.pem](../backend/certs/global-bundle.pem).
-
-## Container and registry controls
-
-[Dockerfile](../backend/Dockerfile) uses the non-root `appuser` UID 10001 and exposes port 8000. The image contains:
-
-- FastAPI application code
-- Alembic configuration and migrations
-- Public RDS CA bundle
-- Python runtime dependencies
-
-[compute/main.tf](../terraform/modules/compute/main.tf) creates an ECR repository with push-time image scanning. ECS runs two Fargate tasks in private subnets.
-
-Current limitations:
-
-- ECR image tags are mutable.
-- No image digest pinning or automated build/signature policy is configured.
-- ECR scan findings are not automatically gated in CI/CD.
-
-## Authentication and password security
-
-[security.py](../backend/app/core/security.py) implements:
-
-- JWT creation with 30-minute expiration
-- `HS256` verification
-- Subject and expiration validation
-- HTTP 401 for missing or invalid tokens
-- Argon2 password hashing through `pwdlib.PasswordHash.recommended()`
-
-JWTs protect application endpoints; HTTPS is required for safe public transport.
-
-## AI security controls
-
-[bedrock_service.py](../backend/app/services/bedrock_service.py) uses Boto3 Bedrock Runtime with a 5-second connect timeout, 60-second read timeout, standard retries, and the Claude Haiku 4.5 US inference profile.
-
-Defenses in [ai_security.py](../backend/app/core/ai_security.py) and [ops.py](../backend/app/api/routes/ops.py):
-
-- Bearer authentication before AI processing
-- Description length limits
-- Input checks for AWS access keys, Bearer tokens, and password assignments
-- Trusted system prompt separated from JSON-serialized untrusted input
-- Read-only role instructions and prompt-injection handling
-- Output checks for sensitive patterns
-- Rejection of prohibited infrastructure-action claims
-- HTTP 502 for provider or output-validation failures
-- No Claude tool or AWS execution capability
-
-These controls are defense-in-depth. Regex patterns can miss or falsely classify text, and prompt defenses cannot provide complete prompt-injection prevention.
-
-## Verified cloud security tests
-
-All tests below ran in a standalone ECS Fargate task using FastAPI `TestClient`, live Bedrock inference, and a synthetic JWT generated inside the container:
-
-| Test | Result |
-| --- | --- |
-| Missing authentication | HTTP 401 |
-| Invalid JWT | HTTP 401 |
-| Prohibited sensitive input | HTTP 400 |
-| Valid authenticated request | HTTP 200 |
-
-Public login and authenticated ALB traffic were not tested because HTTPS is not configured.
-
-## Security control table
-
-| Control | Status | Verification |
+| Threat | Existing mitigation | Residual risk |
 | --- | --- | --- |
-| Private ECS networking | Implemented | ECS private subnets, no public IP |
-| Private RDS | Implemented | Public access disabled, SG reference |
-| RDS encryption at rest | Implemented | `storage_encrypted=true` |
-| RDS TLS verification | Implemented | AWS CA bundle and `verify-full` |
-| Secrets Manager database credentials | Implemented | ECS secret injection |
-| Secrets Manager JWT signing secret | Implemented | ECS execution role secret injection |
-| Execution/task role separation | Implemented | Separate IAM roles |
-| Scoped Bedrock permissions | Implemented | Model and inference-profile resource ARNs |
-| Argon2 password hashing | Implemented | `pwdlib` recommended hasher |
-| JWT HS256 and 30-minute expiry | Implemented | Source and security tests |
-| AI input/output validation | Implemented | Cloud and local tests |
-| ECR scan on push | Implemented | ECR repository setting |
-| Non-root container | Implemented | UID 10001 |
-| RDS backup retention | Implemented | One day |
-| MFA-backed deployment identity | Verified for deployment | Temporary session evidence |
-| HTTPS | Not implemented | HTTP listener is development-only |
-| Multi-AZ RDS | Future improvement | Single-AZ only |
-| Production monitoring | Future improvement | Basic ECS logs only |
-| Automated CI/CD | Future improvement | No deployment pipeline |
+| Public access to database/tasks | Private subnets, no ECS public IP, security-group references | Misconfiguration, compromised application identity, shared NAT dependency |
+| Credential interception | Secrets Manager, private DB TLS | Public ALB HTTP; JWT key rotation not evidenced |
+| Password compromise | Password hashing | No MFA/account lockout/rate limiting evidence |
+| Unauthorized API use | JWT dependency on protected routes | No revocation, rate limits, or verified TLS path |
+| Secret in AI prompt | Selected regex patterns and JSON payload | Pattern gaps, paraphrase, false negatives, confidential context leakage |
+| Prompt injection | Separate system prompt, untrusted-data framing, read-only model role | Model behavior is probabilistic; controls do not fully prevent injection |
+| Unsafe model response | Limited output checks; no action tools | Novel claims/hallucinations can pass; human verification required |
+| Unauthorized AWS invocation | Scoped task-role permission | IAM/resource-policy mistakes, quota/cost abuse |
+| Data loss | RDS backups | One-day retention, Single-AZ, no final snapshot, restore not evidenced |
+| Malicious/outdated image | ECR scan-on-push | Mutable tag, no digest pin or release gate |
 
-## Threat modeling
+## Production-oriented improvements
 
-| Threat | Implemented mitigation | Remaining exposure |
-| --- | --- | --- |
-| Public database access | Private subnet and reference security groups | Master credential compromise, misconfiguration |
-| Token forgery or replay | HS256 verification and 30-minute expiry | No HTTPS listener; key compromise; no revocation list |
-| ECS credential exposure | Separate task role and no static AWS keys | IAM misconfiguration |
-| Secrets disclosure | Secrets Manager and ECS injection | Secret exposure in logs or memory |
-| Database credential on the network | PostgreSQL TLS verification | Trusts AWS CA bundle; ALB remains HTTP |
-| Sensitive AI input | Regex validation | Pattern gaps and paraphrases |
-| Prompt injection | System prompt and untrusted-data labeling | Not fully resistant |
-| Unsafe AI output | Output pattern validation | Novel unsafe output or trusted-text false positives |
-| Bedrock misuse | Scoped task-role policy | Quota abuse or cost exposure |
-| Container compromise | Non-root runtime and private networking | Broad task-role dependencies and mutable image tags |
+Configure HTTPS and reject/redirect HTTP before authentication; separate the app database user from RDS master; define secret rotation and incident handling; introduce remote encrypted/locked Terraform state; use immutable image digests and audited CI with short-lived roles; add rate limiting, WAF, alarms, tracing, AI quotas, and log minimization; choose Multi-AZ/backup/restore objectives from business requirements; and conduct independent threat modeling and compliance review before any financial use.
 
-## Known limitations and future improvements
+## Source references
 
-- Configure ACM certificates and HTTPS listener; redirect or disable public HTTP.
-- Deploy Multi-AZ RDS and test failover.
-- Replace master database credentials with a restricted application database role.
-- Enforce secret rotation and key lifecycle procedures.
-- Use remote Terraform state with encryption and locking.
-- Add redundant NAT or suitable VPC endpoints.
-- Pin immutable image digests and gate ECR findings.
-- Add CI/CD with short-lived deployment credentials.
-- Add ECS autoscaling, CloudWatch alarms, metrics, tracing, and retention controls.
-- Add AWS WAF, AI endpoint rate limits, concurrency limits, and usage budgets.
-- Expand adversarial prompt-injection tests and structured response validation.
-- Document incident response and key/credential compromise procedures.
-- Complete full banking workflow testing before any production claim.
-
-## Source links
-
-- [Architecture](architecture.md)
-- [AI operations](ai-operations.md)
-- [Network and security groups](../terraform/modules/security/main.tf)
-- [Compute and ECS roles](../terraform/modules/compute/main.tf)
-- [IAM policies](../terraform/modules/iam/main.tf)
-- [RDS configuration](../terraform/modules/database/main.tf)
-- [JWT implementation](../backend/app/core/security.py)
-- [Database TLS implementation](../backend/app/db/database.py)
-- [AI route](../backend/app/api/routes/ops.py)
-- [AI security validation](../backend/app/core/ai_security.py)
+- [IAM](../terraform/modules/iam/main.tf)
+- [Security groups](../terraform/modules/security/main.tf)
+- [ECS task/service](../terraform/modules/compute/main.tf)
+- [RDS](../terraform/modules/database/main.tf)
+- [JWT/password hashing](../backend/app/core/security.py)
+- [Database TLS and URL construction](../backend/app/db/database.py)
+- [AI validation](../backend/app/core/ai_security.py)
+- [AI endpoint](../backend/app/api/routes/ops.py)
+- [AI service](../backend/app/services/bedrock_service.py)
+- [Dockerfile](../backend/Dockerfile)
+- [Troubleshooting index](troubleshooting.md)
