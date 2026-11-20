@@ -2,7 +2,7 @@
 
 ## Intake, retention, and chronology
 
-The source intake is `docs/screenshots/banking-appdocsscreenshots/`. It contains **114 original PNG files, 79 unique SHA-256 contents, and 35 extra byte-for-byte duplicate copies**. Originals remain unmodified at that path and are ignored by Git; do not add them. Reviewed publication copies use descriptive filenames under `docs/screenshots/evidence/`.
+The source intake is `docs/screenshots/banking-appdocsscreenshots/`. It contains **114 original PNG files, 79 unique SHA-256 contents, and 35 extra byte-for-byte duplicate copies**. Originals remain unmodified at that path and are ignored by Git; do not add them. There are currently **32 reviewed publication derivatives** under `docs/screenshots/evidence/`.
 
 Chronology was assessed using the numbered filenames and visible console/log timestamps where available, not filesystem modification times. The numbered 36–51 series is the newest incident/security-validation batch; visible timestamps include November 18 target recovery and November 20 role/AI validation. Earlier numbered screenshots cover development, initial deployment, migration, and AI integration. Some duplicate filenames have different phase labels, so a filename alone is not proof of an independent event or chronology.
 
@@ -27,6 +27,21 @@ Chronology was assessed using the numbered filenames and visible console/log tim
 | Bedrock/IAM | `evidence/ai-integration/bedrock-analysis-after-iam.png` | Later operational-analysis log output; account/task identifiers removed |
 | IAM/security | `evidence/iam-security/task-role-without-policy.png` | Isolated test role with no attached policy; not the production app task role |
 | IAM/security | `evidence/iam-security/bedrock-task-role-policy-attached.png` | Application task role shows an inline policy attachment; statements are not visible in the capture |
+| AWS authentication | `evidence/aws-authentication/sts-invalid-token.png` | `InvalidClientTokenId` error excerpt; local path and command context excluded |
+| AWS authentication | `evidence/aws-authentication/mfa-role-identity-verified.png` | Assumed-role identity fragment; account and session identifiers are masked |
+| Terraform/IAM | `evidence/terraform/iam-permission-denied.png` | Cropped RDS subnet-group operation failure; account/request details excluded |
+| Terraform/IAM | `evidence/terraform/deployment-policy-updated.png` | Deployment-role policy attachment success; account context masked |
+| Terraform/IAM | `evidence/terraform/infrastructure-apply-nine-resources.png` | Apply summary reports nine resources added; outputs and paths excluded |
+| KMS | `evidence/kms/describe-key-access-denied.png` | Redacted `DescribeKey` access-denied excerpt |
+| KMS | `evidence/kms/deployment-policy-kms-read.png` | IAM policy summary showing limited KMS read; exact statement is not visible |
+| KMS | `evidence/kms/rds-key-enabled.png` | KMS query reports key state `Enabled`; local path removed |
+| Database | `evidence/database-migrations/rds-instance-available.png` | RDS PostgreSQL summary shows Available; no customer data |
+| Networking | `evidence/networking/migration-task-private-network.png` | VPC/private-subnet selection; VPC/subnet IDs masked and selected SG not visible |
+| ECR | `evidence/ecr/dev-image-pushed.png` | Docker push layer output; local path, registry URI, and digest masked |
+| ECS | `evidence/ecs-load-balancing/ecs-service-running.png` | ECS cluster snapshot shows an active service, two running tasks, and no pending tasks; cluster ARN masked |
+| Secrets Manager | `evidence/secrets-manager/getsecretvalue-denied.png` | ECS startup secret-retrieval failure; account, secret, task, and request identifiers masked |
+| Secrets Manager | `evidence/secrets-manager/later-task-startup.png` | Later Uvicorn startup log; not correlated to the denied test role/task |
+| Bedrock/IAM | `evidence/ai-integration/bedrock-invokemodel-denied.png` | `InvokeModel` denial log excerpt; principal/account/task identifiers masked |
 
 These are actual source screenshots cropped or masked to remove identifiers/local details where needed. Curated copies have been visually reviewed after processing. Generated model advice is shown as evidence of a response only, not as verified operational guidance. The architecture illustration includes development HTTP and security-control labels; it is illustrative, not evidence of compliance or a guarantee that controls are complete.
 
@@ -99,9 +114,9 @@ Notable mismatch: the `08` failure and `09` resolved screenshots are byte-identi
 Do not link or stage the raw originals. In particular:
 
 - `18-fastapi-startup-resolved.png` shows a generated JWT signing secret in terminal output.
-- MFA/session, Terraform, IAM, RDS, ECR, CloudWatch, and ECS screenshots contain account/resource identifiers or local paths; some have partial manual redaction that needs review.
+- MFA/session, Terraform, IAM, RDS, ECR, CloudWatch, and ECS originals contain account/resource identifiers or local paths; only the separately reviewed derivatives are publishable.
 - `19-bedrock-direct-inference-success.png.png` shows MFA/device/account context.
-- `25-corrected-alembic-docker-image-pushed.png` exposes account/repository details.
+- `25-corrected-alembic-docker-image-pushed.png` exposes account/repository details; its publication derivative masks the URI and digest.
 - `33`–`51` contain role/task/secret/model/resource identifiers and operational prompts/logs.
 - `test installaization ...` and `website GET operation success ...` need owner confirmation before classification as banking evidence.
 

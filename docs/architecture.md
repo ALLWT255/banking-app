@@ -94,7 +94,7 @@ CloudWatch receives container stdout/stderr in `/ecs/<project>-backend`, with se
 
 ## RDS, migrations, and secrets
 
-The RDS module creates PostgreSQL on gp3 with 20 GB default storage, encryption at rest, `publicly_accessible = false`, Single-AZ deployment, one-day backup retention, and `skip_final_snapshot = true`. AWS manages the master-user password and provides its secret ARN to ECS. This is suitable only as a cost-conscious disposable development profile, not a durable customer-data configuration.
+The RDS module creates PostgreSQL on gp3 with 20 GB default storage, encryption at rest, `publicly_accessible = false`, Single-AZ deployment, one-day backup retention, and `skip_final_snapshot = true`. AWS manages the master-user password and provides its secret ARN to ECS. **Operator note:** retention was reduced to one day following a development-account restriction; the original restriction/error is not captured. This is a development constraint and cost-conscious disposable profile, not a durable customer-data configuration.
 
 The API uses SQLAlchemy and Alembic. Migrations were executed through standalone ECS tasks in the private network; the application image includes Alembic files. Schema creation is not automatically run on every process start. The application receives connection fields and secret JSON fields through ECS secret injection. The RDS public CA bundle is included at `backend/certs/global-bundle.pem`; in the ECS deployment `verify-full` uses this CA bundle.
 

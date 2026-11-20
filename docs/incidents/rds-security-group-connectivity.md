@@ -1,55 +1,67 @@
-# RDS security-group connectivity follow-up
+# RDS connectivity and security-group troubleshooting
 
-**Classification:** Development connectivity troubleshooting. **Outcome:** The intake includes a connection failure and a follow-up image labeled as a security-group recovery; an application-level post-change readiness result is not correlated to this event.
+This report keeps two database-network observations distinct: a November 19 application connection-close log, and an operator-reported standalone migration-task timeout caused by a missing backend security group.
 
-## 1. Incident overview
+## Incident A: application connection closed unexpectedly
 
-CloudWatch evidence dated November 19 shows the backend failing while opening a PostgreSQL connection. A later screenshot is named as RDS connectivity restored through a backend security-group change.
+**Incident overview:** CloudWatch evidence dated November 19 shows the backend failing while opening a PostgreSQL connection.
 
-## 2. Symptoms and observed error
+**Symptoms and observed error:** The log reports that the server at a private `10.0.12.x` address on port 5432 closed the connection unexpectedly. This differs from a password-authentication failure and does not by itself prove a security-group issue.
 
-The visible log reports that the server at a private `10.0.12.x` address on port 5432 closed the connection unexpectedly. It also indicates an abnormal server termination or connection processing interruption. This is not the same symptom as `password authentication failed`.
+**Potential banking business impact:** Database connection failures can block login, account reads, or transaction processing. No customer data, real transaction, outage duration, or financial impact is evidenced.
 
-## 3. Potential banking business impact
+**Investigation process:** Check RDS status/events, task ENI/VPC/route, backend and database security groups, DNS, TLS/CA configuration, PostgreSQL logs, and exact task/timestamp correlation. Separate network filtering from a server-side process termination, TLS failure, and bad credentials.
 
-If active, database connection failures could block login, account reads, or transaction processing. No customer data, real transaction, outage duration, or financial impact is evidenced.
+**Root cause:** Not established. The follow-up original filename suggests an SG correction, but the available log does not prove that the SG caused the server to close the connection.
 
-## 4. Investigation process
+**Corrective action:** No specific rule delta is recorded for this event. The separate screenshot labeled “connectivity restored” contains insufficient same-task readiness evidence and is not published as proof of recovery.
 
-Check RDS health/events and endpoint, task-to-RDS route, security-group ingress/egress, task ENI/security group, TLS mode/CA bundle, and PostgreSQL logs. Confirm diagnosis from the same task and timestamp; do not conclude that a security group is responsible from a connection error alone.
+**Why the correction may have worked:** Allowing the backend security group to reach the database security group on TCP 5432 is consistent with the Terraform segmentation and can resolve a blocked network path. It would not by itself resolve a database process failure, credential rejection, or TLS trust error.
 
-## 5. Root cause
+**Recovery validation:** No `/api/ready` or successful SQL query is tied to the same November 19 task/deployment. This event is **not marked fully recovered**.
 
-Not conclusively established. The follow-up filename suggests a security-group correction, but the available log does not prove that the SG was the cause of the server closing the connection.
+**Preventive recommendations:** Use backend-SG-to-database-SG ingress on 5432; correlate task and RDS logs; validate readiness from the same release; and record the precise rule change and validation.
 
-## 6. Corrective action
+**Associated evidence:**
 
-The original is labeled as a backend security-group restoration. The precise rule delta and change record are not available, so no CIDR-wide rule or exact change is claimed. The intended source relationship in Terraform is backend SG to database SG on port 5432.
+![RDS connection failure; private address and task identifier are redacted](../screenshots/evidence/database-migrations/rds-connection-failed.png)
 
-## 7. Why the correction may have worked
+## Incident B: standalone migration task omitted the backend security group
 
-Allowing only the backend security group to reach the database on TCP 5432 is consistent with the Terraform segmentation and can resolve a blocked connection path. It would not by itself resolve a database process failure, bad credentials, or TLS trust error.
+**Incident overview:** A standalone migration task timed out connecting to PostgreSQL. This is separate from the November 19 connection-close event above.
 
-## 8. Recovery validation
+**Symptoms and observed error:** The task log reports `ConnectionTimeout` and `connection timeout expired`.
 
-The later screenshot is not an explicit `/api/ready` or successful SQL query tied to the same deployment/task. The event is therefore **not marked fully recovered** here. Earlier November 17 readiness evidence is not a post-November 19 validation.
+**Potential banking business impact:** A network timeout can block a schema release or delay recovery. No real user, transaction, or data impact is evidenced.
 
-## 9. Preventive recommendations
+**Investigation process:** Compare the migration task's VPC, selected private subnets, ENI, and backend security group with RDS ingress on TCP 5432. Check route tables, DNS, RDS status, and task logs. Useful read-only commands:
 
-- Use the backend SG as the database SG ingress source; avoid public CIDRs.
-- Test `/api/ready` from the ALB and a private task after changing rules.
-- Correlate CloudWatch/RDS events and record the changed rule, principal, and validation.
-- Use PostgreSQL TLS verification and distinguish network, TLS, authentication, and server faults.
+```powershell
+aws ecs describe-tasks --cluster <cluster> --tasks <task-arn>
+aws ec2 describe-security-groups --group-ids <backend-sg-id> <database-sg-id>
+aws rds describe-db-instances --db-instance-identifier <db-identifier>
+```
 
-## 10. Associated evidence
+**Root cause:** **Operator note:** the migration task was launched without the intended backend security group. The task was relaunched with the correct group. The private-network screenshot shows subnet selection but does not show the chosen SG; this root cause is therefore attributed to the operator note.
 
-![RDS connection failure, with task identifier and private address masked](../screenshots/evidence/database-migrations/rds-connection-failed.png)
+**Corrective action:** The task was relaunched with the backend security group, and the migration succeeded according to the operator note and later migration log.
 
-The screenshot named `44-rds-connectivity-restored-backend-security-group.png` remains in the ignored original set and requires review before publication; no derivative is linked because the screenshot itself did not establish application readiness.
+**Why the correction worked:** The RDS security group permits PostgreSQL traffic from the backend security group on TCP 5432. Attaching that group restores the intended path without opening the database to public CIDRs.
+
+**Recovery validation:** The subsequent Alembic task log records a revision upgrade. It supports later migration success but does not show the SG selection itself. It is not evidence that the separate November 19 connection-close event was fixed.
+
+**Preventive recommendations:** Review the standalone task network configuration before launch; explicitly select private subnets and the backend SG; keep the DB ingress source restricted to that SG; and verify migration head/readiness after the task completes.
+
+**Associated evidence:**
+
+![Migration task configuration shows private subnet selection; the selected security-group value is not visible](../screenshots/evidence/networking/migration-task-private-network.png)
+
+![Later migration-task log records an Alembic revision upgrade](../screenshots/evidence/database-migrations/alembic-revision-applied.png)
 
 ## Related documentation
 
 - [Security-group module](../../terraform/modules/security/main.tf)
 - [RDS module](../../terraform/modules/database/main.tf)
 - [Database TLS implementation](../../backend/app/db/database.py)
+- [Database authentication and migration report](database-connectivity-and-migrations.md)
 - [Troubleshooting index](../troubleshooting.md)

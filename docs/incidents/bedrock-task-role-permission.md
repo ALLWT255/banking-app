@@ -8,7 +8,7 @@ On November 20, screenshots show a test ECS application task role with no attach
 
 ## 2. Symptoms and observed error
 
-The test task-role screenshot shows zero permission policies. The following evidence is named for `bedrock:InvokeModel` denial. Later CloudWatch output contains a generated analysis response, and an API test screenshot records a successful request.
+The test task-role screenshot shows zero permission policies. A CloudWatch log records `AccessDeniedException` for `bedrock:InvokeModel`. Later CloudWatch output contains a generated analysis response, and an API test screenshot records a successful request.
 
 ## 3. Potential banking business impact
 
@@ -20,11 +20,11 @@ Verify the role attached to the ECS task definition, caller identity for the run
 
 ## 5. Root cause
 
-The test role had no permissions and the subsequent screenshot sequence identifies a Bedrock runtime access denial. This is consistent with missing `bedrock:InvokeModel` authorization for the selected inference profile/resources.
+The isolated test role had no permissions and the CloudWatch log records a Bedrock runtime access denial. This is consistent with missing `bedrock:InvokeModel` authorization for the selected inference profile/resources.
 
 ## 6. Corrective action
 
-The application task role was configured with scoped `bedrock:InvokeModel` permissions in Terraform. The source policy names the US inference profile and associated regional foundation model ARNs. The exact live policy update event is not included in the screenshot evidence.
+**Operator note:** Bedrock invocation permissions belong on the ECS application task role. Terraform configures scoped `bedrock:InvokeModel` on that role for the US inference profile and associated regional foundation-model resources. The exact live policy update event for the isolated test role is not included.
 
 ## 7. Why the correction worked
 
@@ -45,6 +45,8 @@ Later CloudWatch output contains an operational analysis at 09:17 on November 20
 ## 10. Before/after evidence
 
 ![Test role with no attached permissions, redacted](../screenshots/evidence/iam-security/task-role-without-policy.png)
+
+![Bedrock InvokeModel access denial in CloudWatch; principal and account identifiers are masked](../screenshots/evidence/ai-integration/bedrock-invokemodel-denied.png)
 
 ![Bedrock operational analysis after permissions were available, redacted](../screenshots/evidence/ai-integration/bedrock-analysis-after-iam.png)
 

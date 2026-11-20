@@ -1,106 +1,97 @@
 # PostgreSQL connectivity and Alembic migration failures
 
-This report keeps distinct database symptoms separate. Successful migration evidence does not prove that every earlier authentication/network error had the same cause.
+This report distinguishes a credential-rendering failure from a later network timeout. A successful migration does not prove that every earlier database error shared one cause.
 
 ## Incident A: PostgreSQL authentication rejected the migration connection
 
-### 1. Incident overview
+### Incident overview
 
-An Alembic-related PostgreSQL log screenshot records an authentication failure for the database user during a development migration sequence.
+An Alembic migration task received a PostgreSQL authentication error during the development deployment sequence.
 
-### 2. Symptoms and observed error
+### Symptoms and observed error
 
-The visible line reports `FATAL: password authentication failed for user "bankadmin"` while connecting to a private 10.x address on port 5432. The actual password was not shown in the publishable evidence.
+The log reports `FATAL: password authentication failed for user "bankadmin"` while connecting to a private address on port 5432. The credential itself is not included in the publication copy.
 
-### 3. Potential banking business impact
+### Potential banking business impact
 
-A migration or application connection failure can block schema deployment and database-backed API operations. No customer impact or data loss is evidenced.
+A blocked migration can delay a release or leave an application incompatible with the intended schema. No customer impact, data loss, or real transaction impact is evidenced.
 
-### 4. Investigation process
+### Investigation process
 
-Confirm the intended secret ARN/version, ECS execution role access, injected username/password mapping, DB hostname/name, and the migration task's network. Avoid printing the URL or secret. Inspect URL construction with a password containing URL-reserved characters using safe unit tests.
+Check the migration task's DB host/name, secret version and field mapping, execution-role secret retrieval, password rendering, CA path/TLS mode, and task network. Avoid printing a password-bearing URL or secret value. Test reserved characters using synthetic credentials.
 
-### 5. Root cause
+### Root cause
 
-The database rejected the credentials supplied for `bankadmin`. The evidence does not distinguish an incorrect/stale password from URL encoding, secret-version mismatch, or another credential assembly error. The often-cited “SQLAlchemy URL password masking” root cause is not verified.
+**Operator note:** an earlier Alembic version converted a SQLAlchemy URL object with `str(database_url)`. SQLAlchemy's string representation masked the password, causing the migration to receive an unusable URL. Git history first tracks the corrected migration environment; it does not contain the earlier local version, so the historical `str()` implementation is supported by the operator note rather than a committed diff.
 
-### 6. Corrective action
+### Corrective action
 
-A later screenshot is named as a corrected migration image push, and subsequent screenshots show an Alembic revision applied and the head revision recorded. The precise credential correction/build change and correlation to the same task are not preserved.
+The migration configuration was corrected to call `render_as_string(hide_password=False)` for SQLAlchemy URL objects and then replace `%` with `%%` before setting Alembic's config option. The current [Alembic environment](../../backend/migrations/env.py) contains this logic. **Operator note:** the Docker image was rebuilt and pushed after the correction.
 
-### 7. Why the correction worked
+### Why the correction worked
 
-The later migration evidence shows that a subsequent task could connect and run the revision. It does not establish which credential/configuration change fixed the earlier failure.
+SQLAlchemy hides passwords in ordinary string conversion. Alembic requires the password-bearing URL to connect, while its configuration parser treats `%` as interpolation syntax. Explicit rendering plus percent escaping preserves the intended URL through both steps.
 
-### 8. Recovery validation
+### Recovery validation
 
-Screenshots record the initial migration revision `d368608d12af` running and later `d368608d12af (head)`; database tables were also reported verified. This validates the recorded migration outcome, not the exact earlier fix.
+The [ECR push screenshot](../screenshots/evidence/ecr/dev-image-pushed.png) records uploaded image layers with repository and digest masked. A later [migration log](../screenshots/evidence/database-migrations/alembic-revision-applied.png) records the Alembic revision upgrade. These support the later image/migration sequence; no credential values are published.
 
-### 9. Preventive recommendations
+### Preventive recommendations
 
-- Use `URL.create` or equivalent structured URL construction; do not interpolate or log a raw password-bearing URL.
-- Make ECS secret version and migration task definition explicit during deployment.
-- Verify connectivity with an approved private task before schema changes.
-- Keep application DB roles least-privileged and separate from the RDS master account.
-- Maintain migration backups and a tested rollback/recovery procedure.
+- Use structured SQLAlchemy URL creation and explicit rendering where Alembic config interpolation is involved.
+- Never print/log a password-bearing URL.
+- Test reserved characters using synthetic values.
+- Pin the image digest/task-definition revision used for the migration.
+- Verify the Alembic head and application readiness before routing traffic.
 
-### 10. Associated evidence
+## Incident B: standalone migration task timed out
 
-![PostgreSQL password authentication failure, with private address masked](../screenshots/evidence/database-migrations/postgres-authentication-failed.png)
+### Incident overview
 
-![Alembic revision applied in the private task, redacted](../screenshots/evidence/database-migrations/alembic-revision-applied.png)
+A later standalone migration task timed out while connecting to PostgreSQL. This is a network symptom, distinct from an authentication rejection.
 
-## Incident B: Migration task connection timeout
+### Symptoms and observed error
 
-### 1. Incident overview
+The task log reports a SQLAlchemy/Psycopg `ConnectionTimeout` and `connection timeout expired`.
 
-A CloudWatch task screenshot records a database connection timeout during a private migration attempt.
+### Potential banking business impact
 
-### 2. Symptoms and observed error
+A timeout can block a schema release or delay service recovery. No real user, transaction, or data impact is evidenced.
 
-The visible log reports SQLAlchemy/Psycopg `ConnectionTimeout` and `connection timeout expired`. This differs from a PostgreSQL password rejection.
+### Investigation process
 
-### 3. Potential banking business impact
+Check the task ENI, VPC, selected private subnets and security groups; confirm backend-SG egress and RDS-SG ingress on TCP 5432; then check DNS, routes, RDS status, and logs. A timeout alone does not identify a security-group cause.
 
-A timeout can delay schema deployment and leave a release waiting on database readiness. No real user or data impact is evidenced.
+### Root cause
 
-### 4. Investigation process
+**Operator note:** the task was launched without the intended backend security group. The timeout's root cause is therefore recorded from the operator account; the available network screenshot shows private subnet selection but does not show the chosen group.
 
-Check that the task is in the intended VPC/private subnets, route and network ACL behavior, backend security-group egress, DB security-group ingress from the task security group on 5432, endpoint/port, RDS state, and task logs. A timeout is not proof of a specific security-group rule.
+### Corrective action
 
-### 5. Root cause
+**Operator note:** the migration task was relaunched with the correct backend security group and the migration succeeded. The [RDS security-group report](rds-security-group-connectivity.md) keeps this separate from a different November 19 connection-closed log.
 
-Not established. The timeout indicates the connection was not completed; the screenshot does not isolate routing, security groups, endpoint resolution, RDS state, or another network cause.
+### Why the correction worked
 
-### 6. Corrective action
+RDS permits PostgreSQL traffic from the backend security group on TCP 5432. Attaching the intended group restores the allowed task-to-database path without opening the database to public CIDRs.
 
-Subsequent screenshots show a later migration task completing and its revision at head. No specific network change is tied to the earlier timeout in the evidence.
+### Recovery validation
 
-### 7. Why the correction worked
+The later [Alembic task log](../screenshots/evidence/database-migrations/alembic-revision-applied.png) records a revision upgrade. The screenshot does not display the SG selection, so the task relaunch details remain operator-provided.
 
-The later task's migration logs establish that database connectivity was eventually available to that task. They do not identify the earlier failure mechanism.
+### Preventive recommendations
 
-### 8. Recovery validation
+- Make migration task network settings explicit and review subnet/SG selection before launch.
+- Use only backend-SG-to-database-SG ingress on TCP 5432.
+- Correlate task and RDS events by timestamp and task identity.
+- Validate database readiness from the same release after a network change.
 
-Later migration and schema-revision evidence exists. The exact same task/configuration was not demonstrated, so this incident's cause is unresolved even though migration success was later recorded.
-
-### 9. Preventive recommendations
-
-- Capture task ENI/subnets/security-group IDs privately and correlate them with RDS ingress.
-- Test TCP reachability and database readiness from the same private network.
-- Include bounded connection timeouts and useful non-secret diagnostics.
-- Separate network timeout, TLS trust, and authentication failures in runbooks.
-
-### 10. Associated evidence
-
-![Migration task connection timeout](../screenshots/evidence/database-migrations/migration-connection-timeout.png)
-
-![Later Alembic migration revision evidence](../screenshots/evidence/database-migrations/alembic-revision-applied.png)
-
-## Related implementation
+## Related implementation and configuration notes
 
 - [SQLAlchemy URL/TLS setup](../../backend/app/db/database.py)
 - [Alembic environment](../../backend/migrations/env.py)
 - [Initial schema revision](../../backend/migrations/versions/d368608d12af_create_initial_banking_tables.py)
 - [RDS and security groups](../../terraform/modules/database/main.tf)
+- [RDS security-group incident](rds-security-group-connectivity.md)
 - [Incident index](README.md)
+
+**RDS backup retention:** **Operator note:** retention was reduced to one day following a development-account restriction. The current Terraform value corroborates one-day retention, but the restriction/error screenshot and previous value are not available. This is a development constraint, not a verified production backup incident.

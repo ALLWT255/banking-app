@@ -1,6 +1,6 @@
 # ALB HTTP 503 and draining targets
 
-**Classification:** Controlled development deployment/troubleshooting event. **Outcome:** Health and database readiness were later observed returning HTTP 200; the initiating change is unknown.
+**Classification:** Deliberate development break/fix exercise, based on an operator note. **Outcome:** Health and database readiness were later observed returning HTTP 200; no customer outage is evidenced.
 
 ## Incident overview
 
@@ -24,19 +24,19 @@ The evidence supports checking target registration/health reason codes, ECS desi
 
 ## Root cause
 
-The target group observed no healthy target capacity while both targets were draining. The evidence does not show why deregistration began or which configuration/change initiated it; do not label it an application crash, bad health-check path, or specific deployment as a proven root cause.
+**Operator note:** ECS desired task count was deliberately set to zero to simulate unavailable backend capacity. That explains why no healthy task capacity was available during the exercise. The screenshot sequence shows the ALB symptom and draining/zero-healthy state but does not independently show the scale change. This was not a production or customer outage.
 
 ## Corrective action
 
-The evidence shows the service returned to successful health/readiness responses later in the sequence. It does not identify a specific operator change. Do not state that a particular rollback, scale-up, or target-group edit caused recovery.
+**Operator note:** Service capacity was restored after the exercise. The exact recovery command and event are not captured in the screenshot set.
 
 ## Why the correction worked
 
-An ALB can serve requests once registered targets return to a healthy state and the application responds successfully. The precise recovery mechanism remains unknown.
+An ALB can serve requests only after ECS tasks start, register as IP targets, pass health checks, and become healthy. Restoring task capacity allows that sequence to complete.
 
 ## Recovery validation
 
-At 16:46:43–16:46:44 GMT on November 18, the recorded commands returned HTTP 200 for both endpoints. The readiness body reported the database connected. This is a point-in-time recovery check, not an availability SLO or proof of continued service.
+At 16:46:43–16:46:44 GMT on November 18, the recorded commands returned HTTP 200 for both endpoints. The readiness body reported the database connected. This is a point-in-time recovery check, not an availability SLO, outage-duration measurement, or proof of continued service.
 
 ## Preventive recommendations
 

@@ -1,6 +1,6 @@
 # AWS session and Terraform permission failures
 
-**Classification:** Deployment/operator troubleshooting, not an observed customer outage. **Outcome:** The documented deployment subsequently completed; current AWS access was not checked.
+**Classification:** Deployment/operator troubleshooting, not an observed customer outage. **Outcome:** Later role identity and Terraform apply evidence record historical recovery; current AWS access was not checked.
 
 ## Incident overview
 
@@ -26,11 +26,11 @@ Separate credential-chain failure from IAM authorization:
 
 ## Root cause
 
-The credential screenshot names indicate an invalid/expired or otherwise unusable temporary session; the later screenshot shows an assumed role/caller identity succeeding. Terraform also lacked one or more provisioning permissions for the actions denied in the deployment screenshots. The exact session expiry cause and full policy delta are not preserved, so no more specific root cause is asserted.
+The `InvalidClientTokenId` response establishes that the submitted session was unusable, but not whether it expired, was malformed, or came from the wrong profile. A separate MFA recovery screenshot shows `iam:ListMFADevices` denied. Terraform errors record `rds:CreateDBSubnetGroup` and `iam:PutRolePolicy` authorization failures. The full external policy delta and exact invalid-session cause are not preserved.
 
 ## Corrective action
 
-The evidence sequence shows an MFA-backed role/session succeeding after the invalid-token state and deployment-role permissions being updated. A later infrastructure apply completed with nine resources added. The exact policy document and scope used for that recovery are not available; this report does not recommend broad administrator access.
+The evidence sequence shows an MFA-backed assumed-role identity, a deployment-role policy attachment, and a later infrastructure apply completing with nine resources added. The exact policy document and scope used for that recovery are not available; this report does not recommend broad administrator access.
 
 ## Why the correction worked
 
@@ -51,7 +51,7 @@ The screenshot sequence includes successful role/caller-identity output and a la
 
 ## Associated evidence
 
-The original AWS session and Terraform permission screenshots remain in the ignored intake folder because they contain account, role, or MFA context. No public derivative is included. The report relies on the preserved deployment sequence and repository history; see the [screenshot inventory](../screenshots/README.md) for intake handling.
+Reviewed derivatives are published: [invalid STS token](../screenshots/evidence/aws-authentication/sts-invalid-token.png), [assumed-role identity fragment](../screenshots/evidence/aws-authentication/mfa-role-identity-verified.png), [Terraform permission failure](../screenshots/evidence/terraform/iam-permission-denied.png), [policy attachment](../screenshots/evidence/terraform/deployment-policy-updated.png), and [later apply summary](../screenshots/evidence/terraform/infrastructure-apply-nine-resources.png). Account, request, session, and local-path details are omitted or masked. The unredacted originals remain ignored.
 
 ## Related documentation
 

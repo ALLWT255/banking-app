@@ -1,50 +1,53 @@
 # KMS key metadata permission failure
 
-**Classification:** Deployment/operator permission troubleshooting. **Outcome:** Key-state evidence follows the permission update; end-to-end RDS recovery is not established by this evidence alone.
+**Classification:** Development operator-permission troubleshooting. **Outcome:** The key-state query later reported `Enabled`; end-to-end RDS recovery is not established by that result alone.
 
 ## Incident overview
 
-The intake includes screenshots named for RDS KMS key access and `kms:DescribeKey` denial, followed by a deployment-role permission update and a key-state check. One screenshot labeled `11-rds-kms-key-not-accessible.png` is an exact duplicate of a Terraform plan screenshot, so it is not treated as independent KMS evidence.
+The source sequence includes a KMS `DescribeKey` access denial, a later deployment-role policy summary with limited KMS read, and a key-state query.
 
-## Symptoms and observed errors
+## Symptoms and observed error
 
-The source filenames indicate a KMS key access/metadata permission failure and a `DescribeKey` access-denied check for an AWS-managed RDS key alias. The unredacted terminal evidence is retained locally; the image content is not sufficiently reliable to quote an exact error string in this publication copy.
+The redacted terminal excerpt records an access-denied `DescribeKey` operation. Key/account/request identifiers are removed. A screenshot labeled for an inaccessible RDS KMS key is an exact duplicate of a Terraform plan and is not independent KMS evidence.
 
 ## Potential banking business impact
 
-Missing KMS permissions can block an authorized infrastructure operator from inspecting or configuring encrypted resources and can delay database provisioning/recovery. No database outage, lost data, or customer impact is established.
+Missing metadata access can block an authorized operator from inspecting encrypted-resource configuration or delay provisioning/recovery. No database outage, data loss, or customer impact is established.
 
 ## Investigation process
 
-Identify whether the failing principal needs key metadata visibility or cryptographic use; inspect the exact denied action, target key, region, caller identity, and key policy. Confirm that the key exists and is enabled, and distinguish AWS-managed key behavior from customer-managed key policy requirements. Do not grant decrypt or key-administration permissions without a demonstrated need.
+Identify the caller, exact key and region, denied action, IAM policy, key policy, permission boundary, and organization controls. Distinguish metadata access from cryptographic use; do not grant decrypt or key-administration privileges without a demonstrated requirement.
 
 ## Root cause
 
-The sequence is consistent with the deployment identity lacking a required KMS metadata permission. The precise effective policy, service request, and whether the initial failure blocked RDS creation are not established by the available screenshot text.
+**Operator note:** the deployment identity was missing `kms:DescribeKey`. The error screenshot is consistent with that action being denied, but does not show the full effective policy set.
 
 ## Corrective action
 
-A later image is labeled as an updated deployment-role KMS permission set, and another shows a successful key-state query. Exact action/resource scope cannot be safely reconstructed from the visible evidence and is not stated as a policy recipe.
+**Operator note:** the correction added scoped `kms:DescribeKey` permission rather than unrestricted KMS access. A later policy summary shows limited KMS read; the exact statement/resource scope is not visible in that capture and is not presented as independently verified.
 
 ## Why the correction worked
 
-Allowing the exact required metadata operation for the relevant key can let Terraform/operator diagnostics inspect key state. That does not automatically grant encryption/decryption access, override a key policy, or prove RDS connectivity.
+`DescribeKey` enables key metadata inspection. It does not grant decrypt, encryption, key administration, or broad cryptographic use. The key policy and other policy layers still affect the effective authorization result.
 
 ## Recovery validation
 
-The follow-up key check reports the key as enabled, according to the screenshot context. No correlated RDS apply/connection test is included in this incident evidence, so the incident is only partially validated.
+The later key-state query reports `Enabled`. This establishes that the metadata query succeeded and the key state was enabled at that point. It does not prove that the RDS creation/connection path completed or that the key was used successfully by RDS.
 
 ## Preventive recommendations
 
-- Capture exact denial details with secrets and account identifiers redacted.
-- Validate the minimum KMS action/resource through policy simulation and an authorized operation.
-- Review key policies, IAM policies, boundaries, and organization controls together.
-- Keep development and production key policies distinct; avoid wildcard KMS grants.
-- Verify database provisioning/connectivity separately from key metadata checks.
+- Grant only the action/resource required by the denied operation.
+- Review IAM policy, key policy, boundary, and organization controls together.
+- Validate with a scoped query and then verify the dependent RDS operation separately.
+- Keep account, key, and request identifiers out of published screenshots.
 
 ## Associated evidence
 
-KMS-related originals remain in the ignored intake folder because the visible account/resource context is not suitable for publication. One screenshot labeled for KMS is an exact duplicate of a Terraform plan and is not independent KMS evidence. No public before/after image is included; the partial outcome above is based on the remaining screenshot sequence.
+![Redacted DescribeKey denial](../screenshots/evidence/kms/describe-key-access-denied.png)
+
+![Deployment policy summary with limited KMS read; action statement is not visible](../screenshots/evidence/kms/deployment-policy-kms-read.png)
+
+![Key-state query reports Enabled](../screenshots/evidence/kms/rds-key-enabled.png)
 
 ## Related documentation
 

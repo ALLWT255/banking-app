@@ -1,6 +1,6 @@
 # ECS Secrets Manager access denial
 
-**Classification:** Candidate controlled break/fix. **Outcome:** A later task-startup screenshot is consistent with recovery but does not prove the denied secret access was corrected on the same role/task.
+**Classification:** Development task-startup permission check. **Outcome:** The denial is evidenced; later application startup is not correlated to the same test role/task.
 
 ## 1. Incident overview
 
@@ -8,7 +8,7 @@ The screenshot intake contains an ECS Secrets Manager access-denied image follow
 
 ## 2. Symptoms and observed error
 
-The screenshot records `secretsmanager:GetSecretValue` denied while ECS attempted startup-time secret retrieval under the execution role. The secret ARN and complete error context are omitted from this public report.
+The screenshot records `secretsmanager:GetSecretValue` denied while ECS attempted startup-time secret retrieval under a test execution role. Secret, account, task, and request identifiers are removed from the publication derivative.
 
 ## 3. Potential banking business impact
 
@@ -20,19 +20,19 @@ Identify whether ECS secret injection failed under the **execution role** (not t
 
 ## 5. Root cause
 
-Not confirmed from a readable error transcript. The source name suggests a Secrets Manager permission issue; the role/policy delta and any KMS dependency are not shown.
+The captured error states that the test execution role had no identity-based policy allowing the requested secret read. **Operator note:** ECS startup-time secret retrieval belongs on the execution role, not the application task role. The repository's Terraform execution-role policy grants `GetSecretValue` on the configured database and JWT secret ARNs. Any KMS dependency or live policy update for the isolated test role is not captured.
 
 ## 6. Corrective action
 
-The later image is labeled as access restored. The repository's Terraform execution-role policy grants `secretsmanager:GetSecretValue` on the supplied DB and JWT secret ARNs. The exact change performed during the screenshot sequence is not evidenced.
+The repository configures scoped `secretsmanager:GetSecretValue` grants on the execution role for configured DB/JWT secret ARNs. The exact live policy change applied to the test role is not evidenced, so this is not reported as a confirmed correction to that test.
 
 ## 7. Why the correction may have worked
 
-ECS uses the execution role to retrieve task-definition secrets before the container starts. Granting the narrowly required secret read to that role can allow initialization; a task role policy is not a substitute.
+ECS uses the execution role to retrieve task-definition secrets before the container starts. A narrowly scoped secret read on that role can allow initialization; a task-role policy is not a substitute.
 
 ## 8. Recovery validation
 
-A later screenshot shows the application startup complete at 08:59 on November 20. It does not show the role update, secret retrieval event, same task identity, or a successful `/api/ready` response. Recovery is **indicated but not confirmed**.
+A later screenshot shows the application startup complete at 08:59 on November 20. It does not show the role update, secret retrieval event, same task identity, or a successful `/api/ready` response. Recovery is **not confirmed for the denied test role/task**.
 
 ## 9. Preventive recommendations
 
@@ -44,7 +44,11 @@ A later screenshot shows the application startup complete at 08:59 on November 2
 
 ## 10. Associated evidence
 
-Original screenshots are named `46-ecs-secrets-manager-access-denied` and `47-ecs-secrets-manager-access-restored`. They contain resource identifiers and remain in the ignored unredacted intake folder; because the denial and recovery could not be correlated reliably, no screenshot derivative is published.
+![Redacted ECS startup denial for `GetSecretValue`](../screenshots/evidence/secrets-manager/getsecretvalue-denied.png)
+
+![Later application startup log; it is not correlated to the denied test role/task](../screenshots/evidence/secrets-manager/later-task-startup.png)
+
+The corresponding originals remain unmodified in the ignored intake directory.
 
 ## Related documentation
 
